@@ -233,12 +233,12 @@ command (e.g. ~find~ or ~ripgrep~) and must be streamed incrementally.
 compatible with any frontend that calls the completion table function on
 each input change.
 
-| Frontend     | Status   | Notes                                          |
-|--------------+----------+------------------------------------------------|
-| ~vertico~    | Full     | Recommended.  Generation-based refresh via ~vertico--exhibit~. |
-| ~icomplete~  | Full     | Refreshes via ~icomplete-exhibit~.             |
-| ~fido~       | Full     | Built on ~icomplete~; works without extra configuration. |
-| ~ivy/counsel~| Partial  | See below.                                     |
+| Frontend      | Status    | Notes                                                          |
+|---------------+-----------+----------------------------------------------------------------|
+| ~vertico~     | Full      | Recommended.  Generation-based refresh via ~vertico--exhibit~. |
+| ~icomplete~   | Full      | Refreshes via ~icomplete-exhibit~.                             |
+| ~fido~        | Full      | Built on ~icomplete~; works without extra configuration.       |
+| ~ivy/counsel~ | Supported | Push model via ~ivy--set-candidates~. See below.               |
 
 ** ivy / counsel
 
@@ -247,21 +247,33 @@ list (~ivy--all-candidates~) and does not re-call the collection function
 on each display refresh.  This conflicts with ~fzf-async~'s pull model,
 where vertico re-calls our collection lambda to get fresh scored results.
 
-Counsel's async commands work around this by having the process filter call
-~ivy--set-candidates~ directly to push new candidates into ivy's state, then
-calling ~ivy--exhibit~ to redraw.  A proper ~fzf-async~ integration for ivy
-would require the same approach: the refresh timer would need to call
-~fzf-native-async-candidates~, push the result via ~ivy--set-candidates~,
-and then call ~ivy--exhibit~.  This is planned but not yet implemented.
+~fzf-async~ handles this with a dedicated push path.  The polling timer
+calls ~fzf-native-async-candidates~ directly, pushes the results via
+~ivy--set-candidates~, and redraws via ~ivy--exhibit~ — the same approach
+used by counsel's async commands.  The stats prompt (directory, selection
+index, filtered/total counts) is delivered via ~ivy-pre-prompt-function~,
+which ivy prepends to the prompt string on each redraw.
+
+*Highlighting caveat:* match highlighting does not work perfectly *yet* with ivy.
+Ivy bypasses ~completion-styles~ entirely and does not call the
+~all-completions~ function where ~fzf-async~ applies face properties to
+matched characters.
 
 * Customization
 
-| Variable                   | Default | Description                        |
-|----------------------------+---------+------------------------------------|
-| ~fzf-async-max-candidates~ | 10000   | Max candidates returned to Elisp.  |
-| ~fzf-async-refresh-delay~  | 0.05    | Seconds between generation polls.  |
-| ~fzf-async-input-debounce~ | 0.2     | Idle seconds to retry after input. |
-| ~fzf-async-input-throttle~ | 0.5     | Min seconds between refreshes.     |
+| Variable                   | Default | Description                                          |
+|----------------------------+---------+------------------------------------------------------|
+| ~fzf-async-max-candidates~ | 10000   | Max candidates returned to Elisp (see note below).  |
+| ~fzf-async-refresh-delay~  | 0.05    | Seconds between generation polls.                   |
+| ~fzf-async-input-debounce~ | 0.2     | Idle seconds to retry after input.                  |
+| ~fzf-async-input-throttle~ | 0.5     | Min seconds between refreshes.                      |
+
+~fzf-async-max-candidates~ caps only the number of strings consed into the
+Emacs list returned to the completion UI.  The C layer always scores and
+sorts *all* candidates: every matching string is passed through the fzf
+scoring threads, the full scored set is counting-sorted, and then only the
+top N are handed back to Elisp.  The ~[FILTERED]~ count in the prompt
+always reflects the true number of matches, not the capped return value.
 
 The prompt overlay shows live status during a search:
 
@@ -323,7 +335,7 @@ In comparison to similar preexisting packages like ~Consult~/~Counsel~,
 
 *Speed.* fzf scoring runs multithreaded in C with a counting-sort final
 pass that is O(n + max_score).  Results stream incrementally so the UI
-stays responsive with millions of candidates.  The goal is to match the
+stays responsive with *millions* of candidates.  The goal is to match the
 performance of ~fzf~ in the terminal from within Emacs.
 
 *True fuzzy matching.* A single query string is used for both filtering

@@ -28,6 +28,13 @@
 (defvar marginalia-annotator-registry)
 (defvar marginalia-command-categories)
 (declare-function icomplete-exhibit "icomplete")
+(defvar ivy-text)
+(defvar ivy--index)
+(defvar ivy-count-format)
+(defvar ivy-completing-read-dynamic-collection)
+(declare-function ivy--set-candidates "ivy")
+(declare-function ivy--exhibit "ivy")
+(defvar ivy-pre-prompt-function)
 
 ;;; Debug logging
 
@@ -178,14 +185,14 @@ Exact Copy of `fussy-make-fzf-highlight-pattern'."
 Returns nil for frontends that do not expose a selection index (e.g. icomplete)."
   (cond
    ((bound-and-true-p vertico-mode) (max 0 vertico--index))
+   ((bound-and-true-p ivy-mode) (and (boundp 'ivy--index) (max 0 ivy--index)))
    (t nil)))
 
 (defun fzf-async--frontend-exhibit ()
   "Trigger a display refresh in the active completion UI.
-Handles vertico and icomplete.  Ivy is not supported here: ivy holds its
-own internal candidate list and requires a different integration approach
-(updating ivy--all-candidates directly) rather than re-calling the
-collection lambda."
+Handles vertico and icomplete.  Ivy's push path is handled separately
+via the `ivy-push' closure in `fzf-async-completing-read': calling
+`ivy--exhibit' alone re-renders stale candidates without re-scoring."
   (when-let* ((win (active-minibuffer-window)))
     (with-selected-window win
       (cond
@@ -242,6 +249,23 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
                                  (format "%s%s [%d](%d) "
                                          prompt dir
                                          last-filtered last-total))))))))
+         ;; Ivy push path: score the current query and push into ivy--all-candidates
+         ;; directly.  Used instead of fzf-async--frontend-exhibit for ivy because
+         ;; ivy does not re-call the collection lambda on timer ticks.
+         (ivy-push
+          (lambda ()
+            (when (and handle (active-minibuffer-window))
+              (when-let* ((query (and (boundp 'ivy-text) ivy-text)))
+                (let ((cands (while-no-input
+                               (fzf-native-async-candidates handle query limit))))
+                  (when (and cands (not (eq cands t)))
+                    (when-let* ((stats (fzf-native-async-stats handle)))
+                      (setq last-filtered (car stats)
+                            last-total    (cdr stats)))
+                    (setq last-query query
+                          last-result cands)
+                    (ivy--set-candidates cands)
+                    (ivy--exhibit)))))))
          retry-timer
          timer)
     (setq timer
@@ -256,7 +280,10 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
                      (setq last-gen gen)
                      (setq last-exhibit-scheduled (float-time))
                      (run-with-idle-timer
-                      0 nil #'fzf-async--frontend-exhibit))))))))
+                      0 nil
+                      (if (bound-and-true-p ivy-mode)
+                          ivy-push
+                        #'fzf-async--frontend-exhibit)))))))))
     (add-hook 'post-command-hook refresh-overlay)
     (sit-for fzf-async-refresh-delay)
     (unwind-protect
@@ -265,12 +292,23 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
               (when (boundp 'vertico-count-format)
                 (setq-local vertico-count-format nil))
               (when (boundp 'icomplete-matches-format)
-                (setq-local icomplete-matches-format nil))
-              (when (boundp 'ivy-count-format)
-                (setq-local ivy-count-format "")))
-          (completing-read
-           prompt
-           (lambda (str _pred action)
+                (setq-local icomplete-matches-format nil)))
+          (let ((ivy-completing-read-dynamic-collection t)
+                (ivy-count-format
+                 (if (bound-and-true-p ivy-mode) "" ivy-count-format))
+                (ivy-pre-prompt-function
+                 (if (bound-and-true-p ivy-mode)
+                     (lambda ()
+                       (let ((idx (fzf-async--frontend-index)))
+                         (if idx
+                             (format "%s %d/[%d](%d) "
+                                     dir (1+ idx) last-filtered last-total)
+                           (format "%s [%d](%d) "
+                                   dir last-filtered last-total))))
+                   ivy-pre-prompt-function)))
+            (completing-read
+             prompt
+             (lambda (str _pred action)
              (pcase action
                ('metadata '(metadata (category . fzf-async)
                                      (display-sort-function . identity)
@@ -300,20 +338,23 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
                                       fzf-async-input-debounce nil
                                       (lambda ()
                                         (setq retry-timer nil)
-                                        (fzf-async--frontend-exhibit)))))
+                                        (if (bound-and-true-p ivy-mode)
+                                            (funcall ivy-push)
+                                          (fzf-async--frontend-exhibit))))))
                            (when-let* ((stats (fzf-native-async-stats handle)))
                              (setq last-filtered (car stats)
                                    last-total    (cdr stats)))
-                           (when-let* ((win (active-minibuffer-window)))
-                             (with-selected-window win
-                               (unless stats-overlay
-                                 (setq stats-overlay
-                                       (make-overlay (point-min) (minibuffer-prompt-end))))
-                               (funcall refresh-overlay)))
+                           (unless (bound-and-true-p ivy-mode)
+                             (when-let* ((win (active-minibuffer-window)))
+                               (with-selected-window win
+                                 (unless stats-overlay
+                                   (setq stats-overlay
+                                         (make-overlay (point-min) (minibuffer-prompt-end))))
+                                 (funcall refresh-overlay))))
                            (setq last-query query
                                  last-result r))
                          (when (equal query last-query) last-result)))))
-               (_ t)))))
+               (_ t))))))
       (cancel-timer timer)
       (when retry-timer (cancel-timer retry-timer))
       (remove-hook 'post-command-hook refresh-overlay)
