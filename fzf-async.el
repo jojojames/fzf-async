@@ -489,6 +489,41 @@ Shell quote arguments."
 
 ;;; Setup
 
+(defconst fzf-async--commands
+  '(fzf-async-find
+    fzf-async-fd
+    fzf-async-rg-files
+    fzf-async-ag-files
+    fzf-async-rg
+    fzf-async-ag
+    fzf-async-git-grep
+    fzf-async-grep
+    fzf-async-grep-current-file
+    fzf-async-ugrep
+    fzf-async-git-ls-files
+    fzf-async-locate
+    fzf-async-spotlight
+    fzf-async-spotlight-apps
+    fzf-async-spotlight-pdfs)
+  "All fzf-async commands that use `fzf-async-completing-read'.")
+
+(defun fzf-async--check-completion-setup (&rest _)
+  "Signal a user-error if the completion configuration is incorrect.
+Guards against two misconfiguration patterns:
+- `fzf-async' in the global `completion-styles' list, which applies the
+  style to every completing-read and breaks callers that pass plain lists.
+- `fzf-async' absent from `completion-category-overrides', which means
+  the style never activates and results are silently re-filtered."
+  (when (memq 'fzf-async completion-styles)
+    (user-error
+     "fzf-async must not be in `completion-styles' globally (it is).  \
+Remove it and ensure `fzf-async-setup' has been called so it is wired \
+via `completion-category-overrides' only"))
+  (unless (assq 'fzf-async completion-category-overrides)
+    (user-error
+     "fzf-async is missing from `completion-category-overrides'.  \
+Call `fzf-async-setup' before using fzf-async commands")))
+
 ;;;###autoload
 (defun fzf-async-setup ()
   "Register the fzf-async completion style and category override.
@@ -499,13 +534,8 @@ Call this once during init before using `fzf-async-completing-read'."
   (add-to-list 'completion-category-overrides
                '(fzf-async (styles fzf-async)))
 
-  (dolist (command '(fzf-async-find
-                     fzf-async-fd
-                     fzf-async-rg-files
-                     fzf-async-ag-files
-                     fzf-async-git-ls-files
-                     fzf-async-locate
-                     fzf-async-spotlight))
+  (dolist (command fzf-async--commands)
+    (advice-add command :before #'fzf-async--check-completion-setup)
     ;; (with-eval-after-load 'marginalia
     ;;   (push `(,command . file)
     ;;         marginalia-command-categories))
