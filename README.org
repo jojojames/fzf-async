@@ -226,6 +226,33 @@ command (e.g. ~find~ or ~ripgrep~) and must be streamed incrementally.
     (fzf-async-setup))
 #+end_src
 
+* Integrations
+
+~fzf-async~ works through the standard Emacs ~completing-read~ API and is
+compatible with any frontend that calls the completion table function on
+each input change.
+
+| Frontend     | Status   | Notes                                          |
+|--------------+----------+------------------------------------------------|
+| ~vertico~    | Full     | Recommended.  Generation-based refresh via ~vertico--exhibit~. |
+| ~icomplete~  | Full     | Refreshes via ~icomplete-exhibit~.             |
+| ~fido~       | Full     | Built on ~icomplete~; works without extra configuration. |
+| ~ivy/counsel~| Partial  | See below.                                     |
+
+** ivy / counsel
+
+Ivy uses a *push model*: the completion UI holds its own internal candidate
+list (~ivy--all-candidates~) and does not re-call the collection function
+on each display refresh.  This conflicts with ~fzf-async~'s pull model,
+where vertico re-calls our collection lambda to get fresh scored results.
+
+Counsel's async commands work around this by having the process filter call
+~ivy--set-candidates~ directly to push new candidates into ivy's state, then
+calling ~ivy--exhibit~ to redraw.  A proper ~fzf-async~ integration for ivy
+would require the same approach: the refresh timer would need to call
+~fzf-native-async-candidates~, push the result via ~ivy--set-candidates~,
+and then call ~ivy--exhibit~.  This is planned but not yet implemented.
+
 * Customization
 
 | Variable                   | Default | Description                        |
