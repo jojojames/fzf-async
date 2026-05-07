@@ -33,6 +33,33 @@ Set to nil or 0 to disable the cap (may be slow for very large result sets)."
                  (integer :tag "Max candidates"))
   :group 'fzf-async)
 
+(defcustom fzf-async-refresh-delay 0.05
+  "Seconds between polls for new C-side candidate generations.
+The background reader thread increments a generation counter as lines
+arrive; this timer checks that counter and schedules a display refresh
+when new data is available.  Lower values feel more responsive but burn
+more CPU on the polling loop.  Analogous to `consult-async-refresh-delay'."
+  :type 'float
+  :group 'fzf-async)
+
+(defcustom fzf-async-input-debounce 0.2
+  "Seconds of idle time to wait before retrying after interrupted scoring.
+When the user types fast, `while-no-input' aborts the scoring call.  This
+idle timer fires once typing pauses and re-triggers the display so results
+self-heal.  Analogous to `consult-async-input-debounce'."
+  :type 'float
+  :group 'fzf-async)
+
+(defcustom fzf-async-input-throttle 0.5
+  "Minimum seconds between display refreshes driven by new incoming data.
+Even when new candidate generations arrive continuously (e.g. a fast `find'
+streaming thousands of files), the completion UI is only re-exhibited once
+per this interval.  The debounce retry path is unaffected — after the user
+pauses typing the display always self-heals regardless of this value.
+Analogous to `consult-async-input-throttle'."
+  :type 'float
+  :group 'fzf-async)
+
 ;;; Completion style
 
 (defun fzf-async-try-completion (string _table _pred _point)
@@ -147,6 +174,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
          (limit (and fzf-async-max-candidates
                      (> fzf-async-max-candidates 0)
                      fzf-async-max-candidates))
+         (last-exhibit-scheduled 0.0)
          (refresh-overlay
           (lambda ()
             (when (and stats-overlay (active-minibuffer-window))
@@ -160,21 +188,25 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
          timer)
     (setq timer
           (run-with-timer
-           0 0.05
+           0 fzf-async-refresh-delay
            (lambda ()
              (when handle
                (let ((gen (fzf-native-async-generation handle)))
                  (when (and gen (not (= gen last-gen)) (not (input-pending-p)))
-                   (setq last-gen gen)
-                   (run-with-idle-timer
-                    0 nil
-                    (lambda ()
-                      (when-let* ((win (active-minibuffer-window)))
-                        (with-selected-window win
-                          (when (fboundp 'vertico--exhibit)
-                            (setq vertico--input t)
-                            (vertico--exhibit))))))))))))
+                   (when (>= (- (float-time) last-exhibit-scheduled)
+                             fzf-async-input-throttle)
+                     (setq last-gen gen)
+                     (setq last-exhibit-scheduled (float-time))
+                     (run-with-idle-timer
+                      0 nil
+                      (lambda ()
+                        (when-let* ((win (active-minibuffer-window)))
+                          (with-selected-window win
+                            (when (fboundp 'vertico--exhibit)
+                              (setq vertico--input t)
+                              (vertico--exhibit)))))))))))))
     (add-hook 'post-command-hook refresh-overlay)
+    (sit-for fzf-async-refresh-delay)
     (unwind-protect
         (let ((vertico-count-format nil))
           (completing-read
@@ -206,7 +238,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
                                (when retry-timer (cancel-timer retry-timer))
                                (setq retry-timer
                                      (run-with-idle-timer
-                                      0.35 nil
+                                      fzf-async-input-debounce nil
                                       (lambda ()
                                         (setq retry-timer nil)
                                         (when-let (win (active-minibuffer-window))
