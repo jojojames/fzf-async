@@ -497,6 +497,14 @@ Searches /Applications for *.app bundles and opens the selection with `open'."
     (start-process "default-app" nil "open" result)))
 
 ;;;###autoload
+(defun fzf-async-tramp ()
+  "Connect to a remote host via TRAMP, with hosts from ~/.ssh/config."
+  (interactive)
+  (let* ((hosts (fzf-async--ssh-hosts))
+         (host (completing-read "SSH host: " hosts nil t)))
+    (find-file (concat "/ssh:" host ":"))))
+
+;;;###autoload
 (defun fzf-async-swiper ()
   "Search the current buffer with swiper.
 Placeholder — delegates to `swiper' until a native async
@@ -514,6 +522,19 @@ async implementation lands."
   (swiper-all))
 
 ;;; Helpers
+
+(defun fzf-async--ssh-hosts ()
+  "Return SSH host names from ~/.ssh/config, excluding wildcard patterns."
+  (let ((config (expand-file-name "~/.ssh/config"))
+        hosts)
+    (when (file-readable-p config)
+      (with-temp-buffer
+        (insert-file-contents config)
+        (while (re-search-forward "^[Hh]ost[[:space:]]+\\(.+\\)" nil t)
+          (dolist (host (split-string (match-string 1)))
+            (unless (string-match-p "[*?!]" host)
+              (push host hosts))))))
+    (nreverse hosts)))
 
 (defun fzf-async--normalize (command)
   "Resolve and shell-quote COMMAND for use with `fzf-async-completing-read'.
