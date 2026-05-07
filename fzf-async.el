@@ -295,17 +295,16 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
                 (setq-local icomplete-matches-format nil)))
           (let ((ivy-completing-read-dynamic-collection t)
                 (ivy-count-format
-                 (if (bound-and-true-p ivy-mode) "" ivy-count-format))
+                 (when (bound-and-true-p ivy-mode) ""))
                 (ivy-pre-prompt-function
-                 (if (bound-and-true-p ivy-mode)
-                     (lambda ()
-                       (let ((idx (fzf-async--frontend-index)))
-                         (if idx
-                             (format "%s %d/[%d](%d) "
-                                     dir (1+ idx) last-filtered last-total)
-                           (format "%s [%d](%d) "
-                                   dir last-filtered last-total))))
-                   ivy-pre-prompt-function)))
+                 (when (bound-and-true-p ivy-mode)
+                   (lambda ()
+                     (let ((idx (fzf-async--frontend-index)))
+                       (if idx
+                           (format "%s %d/[%d](%d) "
+                                   dir (1+ idx) last-filtered last-total)
+                         (format "%s [%d](%d) "
+                                 dir last-filtered last-total)))))))
             (completing-read
              prompt
              (lambda (str _pred action)
