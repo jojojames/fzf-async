@@ -28,6 +28,19 @@
 (defvar marginalia-annotator-registry)
 (defvar marginalia-command-categories)
 
+;;; Debug logging
+
+(defvar fzf-async-debug nil
+  "When non-nil at load time, compile debug logging into fzf-async.
+Set before loading or re-evaluating fzf-async.el; toggling at runtime
+has no effect (the check is macro-expanded at load time, like #ifdef).")
+
+(defmacro fzf-async--log (fmt &rest args)
+  "Emit a debug message if `fzf-async-debug' is non-nil at load time.
+Expands to nothing when disabled — zero runtime cost."
+  (when (bound-and-true-p fzf-async-debug)
+    `(message ,fmt ,@args)))
+
 ;;; Customization
 
 (defcustom fzf-async-max-candidates 10000
@@ -193,6 +206,8 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
               (with-selected-window (active-minibuffer-window)
                 (let ((idx (1+ (max 0 (if (boundp 'vertico--index)
                                           vertico--index 0)))))
+                  (fzf-async--log "DEBUG: %s%s %d/[%d](%d) "
+                                 prompt dir idx last-filtered last-total)
                   (overlay-put stats-overlay 'display
                                (format "%s%s %d/[%d](%d) "
                                        prompt dir idx last-filtered last-total)))))))
