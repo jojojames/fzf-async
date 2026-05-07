@@ -60,6 +60,13 @@ Analogous to `consult-async-input-throttle'."
   :type 'float
   :group 'fzf-async)
 
+(defcustom fzf-async-highlight t
+  "If non-nil, highlight matched characters in completion candidates.
+Set to nil for plain output, which is faster and works better on
+terminals that do not render faces well."
+  :type 'boolean
+  :group 'fzf-async)
+
 ;;; Completion style
 
 (defun fzf-async-try-completion (string _table _pred _point)
@@ -74,13 +81,13 @@ preventing other styles (e.g. fussy) from re-filtering pre-scored results."
   (let* ((beforepoint (substring string 0 point))
          (afterpoint (substring string point))
          (bounds (completion-boundaries beforepoint table pred afterpoint)))
-    (if t
-        (funcall table string pred t)
-      (when-let* ((collection (funcall table string pred t)))
-        (fzf-async--highlight-collection
-         (fzf-async--recreate-regex-pattern
-          beforepoint afterpoint bounds)
-         collection)))))
+    (if fzf-async-highlight
+        (when-let* ((collection (funcall table string pred t)))
+          (fzf-async--highlight-collection
+           (fzf-async--recreate-regex-pattern
+            beforepoint afterpoint bounds)
+           collection))
+      (funcall table string pred t))))
 
 ;;; Highlighting
 
