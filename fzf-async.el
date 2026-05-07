@@ -23,6 +23,8 @@
   :group 'completion
   :link '(url-link :tag "GitHub" "https://github.com/jojojames/fzf-async"))
 
+(defvar embark-keymap-alist)
+
 ;;; Customization
 
 (defcustom fzf-async-max-candidates 10000
