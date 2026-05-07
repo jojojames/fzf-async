@@ -250,7 +250,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
                                       fzf-async-input-debounce nil
                                       (lambda ()
                                         (setq retry-timer nil)
-                                        (when-let (win (active-minibuffer-window))
+                                        (when-let* ((win (active-minibuffer-window)))
                                           (with-selected-window win
                                             (when (fboundp 'vertico--exhibit)
                                               (setq vertico--input t)
@@ -319,7 +319,8 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
 ;;;###autoload
 (defun fzf-async-rg ()
   "Search file contents under `default-directory' with rg.
-Streams all file contents as FILE:LINE:CONTENT; type to fuzzy-filter across them.
+Streams all file contents as FILE:LINE:CONTENT; type to
+ fuzzy-filter across them.
 Selecting a candidate opens the file at that line."
   (interactive)
   (when-let* ((r (fzf-async-completing-read
@@ -337,7 +338,8 @@ Selecting a candidate opens the file at that line."
 ;;;###autoload
 (defun fzf-async-ag ()
   "Search file contents under `default-directory' with ag.
-Streams all file contents as FILE:LINE:CONTENT; type to fuzzy-filter across them.
+Streams all file contents as FILE:LINE:CONTENT; type to
+ fuzzy-filter across them.
 Selecting a candidate opens the file at that line."
   (interactive)
   (when-let* ((r (fzf-async-completing-read
@@ -355,7 +357,8 @@ Selecting a candidate opens the file at that line."
 ;;;###autoload
 (defun fzf-async-git-grep ()
   "Search file contents under `default-directory' with git grep.
-Streams all file contents as FILE:LINE:CONTENT; type to fuzzy-filter across them.
+Streams all file contents as FILE:LINE:CONTENT; type to
+ fuzzy-filter across them.
 Selecting a candidate opens the file at that line."
   (interactive)
   (unless (locate-dominating-file default-directory ".git")
@@ -374,7 +377,8 @@ Selecting a candidate opens the file at that line."
 ;;;###autoload
 (defun fzf-async-grep ()
   "Search file contents under `default-directory' with grep.
-Streams all file contents as FILE:LINE:CONTENT; type to fuzzy-filter across them.
+Streams all file contents as FILE:LINE:CONTENT; type
+ to fuzzy-filter across them.
 Selecting a candidate opens the file at that line."
   (interactive)
   (when-let* ((r (fzf-async-completing-read
@@ -410,7 +414,9 @@ Selecting a candidate jumps to that line in the file."
 ;;;###autoload
 (defun fzf-async-ugrep ()
   "Search file contents under `default-directory' with ugrep.
-Streams all file contents as FILE:LINE:CONTENT; type to fuzzy-filter across them.
+Streams all file contents as FILE:LINE:CONTENT; type to
+ fuzzy-filter across them.
+
 Selecting a candidate opens the file at that line."
   (interactive)
   (when-let* ((r (fzf-async-completing-read
@@ -473,28 +479,19 @@ Searches /Applications for *.app bundles and opens the selection with `open'."
     (start-process "default-app" nil "open" result)))
 
 ;;;###autoload
-(defun fzf-async-spotlight-pdfs ()
-  "Find a PDF file system-wide using Spotlight.
-Opens the selected PDF with `open'."
-  (interactive)
-  (when-let* ((result (fzf-async-completing-read
-                       :prompt "spotlight: "
-                       :command (format "mdfind 'kMDItemFSName == \"*.pdf\"'"
-                                        (executable-find "mdfind"))
-                       :directory default-directory)))
-    (start-process "default-app" nil "open" result)))
-
-;;;###autoload
 (defun fzf-async-swiper ()
   "Search the current buffer with swiper.
-Placeholder — delegates to `swiper' until a native async implementation lands."
+Placeholder — delegates to `swiper' until a native async
+implementation lands."
   (interactive)
   (swiper))
 
 ;;;###autoload
 (defun fzf-async-swiper-all ()
   "Search all open buffers with swiper-all.
-Placeholder — delegates to `swiper-all' until a native async implementation lands."
+
+Placeholder — delegates to `swiper-all' until a native
+async implementation lands."
   (interactive)
   (swiper-all))
 
@@ -535,8 +532,7 @@ so fzf receives an initial empty-query argument."
     fzf-async-git-ls-files
     fzf-async-locate
     fzf-async-spotlight
-    fzf-async-spotlight-apps
-    fzf-async-spotlight-pdfs)
+    fzf-async-spotlight-apps)
   "All fzf-async commands that use `fzf-async-completing-read'.")
 
 (defun fzf-async--check-completion-setup (&rest _)
