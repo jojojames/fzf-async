@@ -24,6 +24,9 @@
   :link '(url-link :tag "GitHub" "https://github.com/jojojames/fzf-async"))
 
 (defvar embark-keymap-alist)
+(defvar marginalia-annotate-file)
+(defvar marginalia-annotator-registry)
+(defvar marginalia-command-categories)
 
 ;;; Customization
 
@@ -535,6 +538,23 @@ so fzf receives an initial empty-query argument."
     fzf-async-spotlight-apps)
   "All fzf-async commands that use `fzf-async-completing-read'.")
 
+(defcustom fzf-async-file-commands
+  '(fzf-async-find
+    fzf-async-fd
+    fzf-async-rg-files
+    fzf-async-ag-files
+    fzf-async-git-ls-files
+    fzf-async-locate
+    fzf-async-spotlight
+    fzf-async-spotlight-apps)
+  "fzf-async commands whose candidates are plain file paths.
+These are registered with marginalia under the `file' category so
+marginalia can annotate them with file size and modification time.
+Commands not listed here (grep-style commands returning FILE:LINE:CONTENT)
+are registered under the `fzf-async' category and receive no annotation."
+  :type '(repeat symbol)
+  :group 'fzf-async)
+
 (defun fzf-async--check-completion-setup (&rest _)
   "Signal a user-error if the completion configuration is incorrect.
 Guards against two misconfiguration patterns:
@@ -547,7 +567,8 @@ Guards against two misconfiguration patterns:
      "fzf-async must not be in `completion-styles' globally (it is).  \
 Remove it and ensure `fzf-async-setup' has been called so it is wired \
 via `completion-category-overrides' only"))
-  (unless (assq 'fzf-async completion-category-overrides)
+  (unless (and (assq 'fzf-async completion-category-overrides)
+               (assq 'fzf-async-file completion-category-overrides))
     (user-error
      "fzf-async is missing from `completion-category-overrides'.  \
 Call `fzf-async-setup' before using fzf-async commands")))
@@ -561,15 +582,30 @@ Call this once during init before using `fzf-async-completing-read'."
                            "Passthrough style for pre-scored async fzf completions."))
   (add-to-list 'completion-category-overrides
                '(fzf-async (styles fzf-async)))
+  ;; fzf-async-file uses the same passthrough style as fzf-async, but lets
+  ;; Marginalia annotate candidates with file metadata (size, date).  It must
+  ;; NOT use the built-in `file' category: Marginalia would then override the
+  ;; completion category to `file', causing any style configured for `file'
+  ;; (e.g. fussy) to re-score the async candidates via fzf-native-score-all.
+  (add-to-list 'completion-category-overrides
+               '(fzf-async-file (styles fzf-async)))
 
   (dolist (command fzf-async--commands)
     (advice-add command :before #'fzf-async--check-completion-setup)
-    ;; (with-eval-after-load 'marginalia
-    ;;   (push `(,command . file)
-    ;;         marginalia-command-categories))
     (with-eval-after-load 'embark
       (add-to-list 'embark-keymap-alist
-                   `(,command . embark-file-map)))))
+                   `(,command . embark-file-map))))
+
+  (with-eval-after-load 'marginalia
+    ;; Register the file annotator for fzf-async-file so file commands still
+    ;; show size/date without handing control to the `file' completion styles.
+    (add-to-list 'marginalia-annotators
+                 '(fzf-async-file marginalia-annotate-file none))
+    (dolist (command fzf-async--commands)
+      (add-to-list 'marginalia-command-categories
+                   `(,command . ,(if (memq command fzf-async-file-commands)
+                                     'fzf-async-file
+                                   'fzf-async))))))
 
 ;; (transient-define-prefix matcha-fzf-async ()
 ;;   "fzf"
