@@ -27,6 +27,7 @@
 (defvar marginalia-annotate-file)
 (defvar marginalia-annotator-registry)
 (defvar marginalia-command-categories)
+(declare-function icomplete-exhibit "icomplete")
 
 ;;; Debug logging
 
@@ -170,6 +171,30 @@ Exact Copy of `fussy-make-fzf-highlight-pattern'."
         (pop pattern)))) ;; remove last 'any
     (completion-pcm--optimize-pattern (nreverse pattern))))
 
+;;; Frontend abstraction
+
+(defun fzf-async--frontend-index ()
+  "Return the active completion UI's selection index (0-based), or nil.
+Returns nil for frontends that do not expose a selection index (e.g. icomplete)."
+  (cond
+   ((bound-and-true-p vertico-mode) (max 0 vertico--index))
+   (t nil)))
+
+(defun fzf-async--frontend-exhibit ()
+  "Trigger a display refresh in the active completion UI.
+Handles vertico and icomplete.  Ivy is not supported here: ivy holds its
+own internal candidate list and requires a different integration approach
+(updating ivy--all-candidates directly) rather than re-calling the
+collection lambda."
+  (when-let* ((win (active-minibuffer-window)))
+    (with-selected-window win
+      (cond
+       ((bound-and-true-p vertico-mode)
+        (setq vertico--input t)
+        (vertico--exhibit))
+       ((bound-and-true-p icomplete-mode)
+        (icomplete-exhibit))))))
+
 ;;; Completing-read
 
 ;;;###autoload
@@ -185,7 +210,7 @@ Exact Copy of `fussy-make-fzf-highlight-pattern'."
 
 The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
   DIR      — abbreviated working directory
-  IDX      — current vertico selection index
+  IDX      — current selection index (omitted for frontends without one)
   FILTERED — candidates matching the current query
   TOTAL    — total candidates collected so far"
   (let* ((handle (fzf-native-async-start command (expand-file-name directory)))
@@ -204,13 +229,19 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
           (lambda ()
             (when (and stats-overlay (active-minibuffer-window))
               (with-selected-window (active-minibuffer-window)
-                (let ((idx (1+ (max 0 (if (boundp 'vertico--index)
-                                          vertico--index 0)))))
-                  (fzf-async--log "DEBUG: %s%s %d/[%d](%d) "
-                                 prompt dir idx last-filtered last-total)
+                (let ((idx (fzf-async--frontend-index)))
+                  (fzf-async--log "DEBUG: %s%s %s[%d](%d) "
+                                 prompt dir
+                                 (if idx (format "%d/" (1+ idx)) "")
+                                 last-filtered last-total)
                   (overlay-put stats-overlay 'display
-                               (format "%s%s %d/[%d](%d) "
-                                       prompt dir idx last-filtered last-total)))))))
+                               (if idx
+                                   (format "%s%s %d/[%d](%d) "
+                                           prompt dir (1+ idx)
+                                           last-filtered last-total)
+                                 (format "%s%s [%d](%d) "
+                                         prompt dir
+                                         last-filtered last-total))))))))
          retry-timer
          timer)
     (setq timer
@@ -225,17 +256,18 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
                      (setq last-gen gen)
                      (setq last-exhibit-scheduled (float-time))
                      (run-with-idle-timer
-                      0 nil
-                      (lambda ()
-                        (when-let* ((win (active-minibuffer-window)))
-                          (with-selected-window win
-                            (when (fboundp 'vertico--exhibit)
-                              (setq vertico--input t)
-                              (vertico--exhibit)))))))))))))
+                      0 nil #'fzf-async--frontend-exhibit))))))))
     (add-hook 'post-command-hook refresh-overlay)
     (sit-for fzf-async-refresh-delay)
     (unwind-protect
-        (let ((vertico-count-format nil))
+        (minibuffer-with-setup-hook
+            (lambda ()
+              (when (boundp 'vertico-count-format)
+                (setq-local vertico-count-format nil))
+              (when (boundp 'icomplete-matches-format)
+                (setq-local icomplete-matches-format nil))
+              (when (boundp 'ivy-count-format)
+                (setq-local ivy-count-format "")))
           (completing-read
            prompt
            (lambda (str _pred action)
@@ -268,11 +300,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
                                       fzf-async-input-debounce nil
                                       (lambda ()
                                         (setq retry-timer nil)
-                                        (when-let* ((win (active-minibuffer-window)))
-                                          (with-selected-window win
-                                            (when (fboundp 'vertico--exhibit)
-                                              (setq vertico--input t)
-                                              (vertico--exhibit))))))))
+                                        (fzf-async--frontend-exhibit)))))
                            (when-let* ((stats (fzf-native-async-stats handle)))
                              (setq last-filtered (car stats)
                                    last-total    (cdr stats)))
