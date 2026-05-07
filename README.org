@@ -1,6 +1,9 @@
 #+TITLE: fzf-async
 #+STARTUP: noindent
 
+[[./screenshots/fzf-async.png]]
+[[./screenshots/demo.gif]]
+
 This package provides async fuzzy completion for Emacs backed by
 [[https://github.com/dangduc/fzf-native][fzf-native]].
 A shell command streams candidates into a background reader thread;
@@ -25,7 +28,7 @@ rescores and re-sorts them.  Those two stages may use incompatible matching
 semantics: ~rg~ applies regex or literal matching while the completion style
 applies its own fuzzy or flex logic.
 
-[[https://github.com/minad/consult#asynchronous-search][consult: asynchronous search]]
+e.g. [[https://github.com/minad/consult#asynchronous-search][consult: asynchronous search]]
 
 ~fzf-async~ eliminates the two-stage problem entirely. The shell command runs
 *without a query* and emits candidates unconditionally. The user's query is
@@ -54,8 +57,8 @@ comparison sort for large candidate sets.
 
 ** Multi-component filtering
 
-Queries may contain multiple space-separated terms.  All terms must match
-(AND semantics).  This mirrors the fzf command-line search syntax:
+Queries may contain multiple space-separated terms.
+This mirrors the fzf command-line search syntax:
 
 | Syntax          | Meaning                                  |
 |-----------------+------------------------------------------|
@@ -74,7 +77,7 @@ Refer to the full query syntax:
 
 ** Multithreaded scoring
 
-Specific to Emacs, scoring is performed by
+Scoring is performed by
 [[https://github.com/dangduc/fzf-native][fzf-native]],
 a C dynamic module that spawns multiple worker threads to split up the work.
 
@@ -86,14 +89,31 @@ and are scored.
 
 * Installation
 
-Minimal setup:
+Dependencies:
+
+~fzf-native~
+
+Main Repo:
 
 #+begin_src emacs-lisp :tangle yes
   (use-package fzf-native
     :vc (:url "https://github.com/dangduc/fzf-native")
     :config
     (fzf-native-load-dyn))
+#+end_src
 
+Fork: (Might have to use this for now.)
+
+#+begin_src emacs-lisp :tangle yes
+  (use-package fzf-native
+    :vc (:url "https://github.com/jojojames/fzf-native")
+    :config
+    (fzf-native-load-dyn))
+#+end_src
+
+Minimal setup:
+
+#+begin_src emacs-lisp :tangle yes
   (use-package fzf-async
     :vc (:url "https://github.com/jojojames/fzf-async")
     :config
@@ -105,6 +125,7 @@ Recommended:
 #+begin_src emacs-lisp :tangle yes
   (use-package fzf-native
     :vc (:url "https://github.com/dangduc/fzf-native")
+    ;; OR :vc (:url "https://github.com/jojojames/fzf-native")
     :config
     (fzf-native-load-dyn))
 
@@ -143,18 +164,17 @@ All commands open the selected candidate in Emacs.
 
 ** File finders
 
-| ~fzf-async~              | ~counsel~           | ~consult~        |
-|--------------------------+---------------------+------------------|
-| ~fzf-async-find~         | ~counsel-find-file~ | ~consult-find~   |
-| ~fzf-async-fd~           | —                   | ~consult-fd~     |
-| ~fzf-async-rg-files~     | —                   | ~consult-find~   |
-| ~fzf-async-ag-files~     | —                   | —                |
-| ~fzf-async-git-ls-files~ | ~counsel-git~       | —                |
-| ~fzf-async-hg-files~     | —                   | —                |
-| ~fzf-async-locate~       | ~counsel-locate~    | ~consult-locate~ |
-| ~fzf-async-spotlight~    | —                   | —                |
-| ~fzf-async-spotlight-apps~ | —                 | —                |
-| ~fzf-async-spotlight-pdfs~ | —                 | —                |
+| ~fzf-async~                | ~counsel~           | ~consult~        |
+|----------------------------+---------------------+------------------|
+| ~fzf-async-find~           | ~counsel-find-file~ | ~consult-find~   |
+| ~fzf-async-fd~             | —                   | ~consult-fd~     |
+| ~fzf-async-rg-files~       | —                   | ~consult-find~   |
+| ~fzf-async-ag-files~       | —                   | —                |
+| ~fzf-async-git-ls-files~   | ~counsel-git~       | —                |
+| ~fzf-async-hg-files~       | —                   | —                |
+| ~fzf-async-locate~         | ~counsel-locate~    | ~consult-locate~ |
+| ~fzf-async-spotlight~      | —                   | —                |
+| ~fzf-async-spotlight-apps~ | —                   | —                |
 
 ** Content search
 
@@ -199,7 +219,7 @@ for general ~completing-read~ and ~completion-at-point~ (e.g. code
 completion).  Both ~fussy~ and ~fzf-async~ are backed by the same
 [[https://github.com/dangduc/fzf-native][fzf-native]]
 module, giving you consistent fuzzy matching semantics with ~fzf~ across
-synchronous and asynchronous contexts.
+both synchronous and asynchronous contexts.
 
 ~fussy~ operates synchronously on in-memory candidate lists and integrates
 with ~company~, ~corfu~, ~eglot~, and all standard ~completing-read~
@@ -240,6 +260,8 @@ each input change.
 | ~fido~        | Full      | Built on ~icomplete~; works without extra configuration.       |
 | ~ivy/counsel~ | Supported | Push model via ~ivy--set-candidates~. See below.               |
 
+Caveat: I mostly use ~vertico~ these days so wasn't exhaustive with using the
+other completion systems.
 ** ivy / counsel
 
 Ivy uses a *push model*: the completion UI holds its own internal candidate
@@ -259,6 +281,8 @@ Ivy bypasses ~completion-styles~ entirely and does not call the
 ~all-completions~ function where ~fzf-async~ applies face properties to
 matched characters.
 
+Help appreciated.
+
 * Customization
 
 | Variable                   | Default | Description                                          |
@@ -274,6 +298,12 @@ sorts *all* candidates: every matching string is passed through the fzf
 scoring threads, the full scored set is counting-sorted, and then only the
 top N are handed back to Elisp.  The ~[FILTERED]~ count in the prompt
 always reflects the true number of matches, not the capped return value.
+
+This is done because anything interfacing with Emacs itself is easily the slowest
+part of the algorithm. Even converting C strings to Emacs strings can be a burden
+when the total collection size is millions of candidates. In practice, the cap
+should not be an issue (and is configurable anyways) since it's returning the top N
+candidates at any one time.
 
 The prompt overlay shows live status during a search:
 
@@ -329,6 +359,18 @@ arguments before passing the command string.
   extremely slow over millions of files.  This problem is shared with
   ~consult~-related commands: each keystroke triggers a new filter query
   to the underlying binary.
+- [[https://github.com/minad/affe][affe]] is the closest architectural cousin.
+  Like ~fzf-async~, it runs a producer process in the background and filters
+  candidates asynchronously.  The key differences:
+  ([[https://github.com/minad/affe#details][affe: details]]):
+  - *Matching*: affe transforms the query into a list of regular expressions
+    and filters with ~all-completions~, which may plug into ~orderless~ for
+    the final filtering and sorting.
+  - *Ranking*: Both ~affe~ and ~orderless~ do not do any scoring or matching.
+  - *Performance*: affe calls out to an external process for the initial
+    filtering but a lot of postprocessing runs in Elisp.
+
+(This comparison is on best efforts, so might be inaccurate. :))
 
 In comparison to similar preexisting packages like ~Consult~/~Counsel~,
 ~fzf-async~ provides:
@@ -342,9 +384,9 @@ performance of ~fzf~ in the terminal from within Emacs.
 and scoring in one pass — no two-stage conflict, no mismatches between
 what the shell tool matched and what the completion framework ranked.
 
-*Simplicity.* ~fzf-async.el~ is roughly 500 lines of Emacs Lisp, most of
-which declares the built-in commands.  ~fzf-native-module.c~ is roughly
-1000 lines.
+*Simplicity.* ~fzf-async.el~ is roughly 1000 lines of Emacs Lisp, most of
+which declares the built-in commands and ~fzf-native-module.c~ is also
+roughly 1000 lines.
 
 ** Downsides
 ~fzf-async~ requires
@@ -355,7 +397,6 @@ If a pure-Elisp solution is preferred,
 and [[https://github.com/abo-abo/swiper][counsel]] are mature, widely
 supported alternatives that require no native compilation.
 ** Prior Discussions
-
 [[https://github.com/abo-abo/swiper/pull/1151][swiper: add counsel-fzf]]
 [[https://github.com/abo-abo/swiper/issues/848][swiper: fzf integration]]
 [[https://github.com/minad/consult/issues/587][consult: fzf integration]]
