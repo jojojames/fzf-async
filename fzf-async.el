@@ -186,14 +186,14 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
                                      (cycle-sort-function . identity)))
                ;; Treat the whole input as one field; prevents space-splitting.
                (`(boundaries . ,_) (cons 0 0))
-               ('t (let* (;; Read the real minibuffer content rather than trusting str,
-                          ;; which the completion framework may split at spaces.
-                          ;; If the minibuffer isn't active (e.g. called from a timer
-                          ;; context), skip scoring entirely rather than falling back to
-                          ;; str="", which would poison last-result with unfiltered results.
-                          (query (when-let* ((win (active-minibuffer-window)))
-                                   (with-current-buffer (window-buffer win)
-                                     (minibuffer-contents-no-properties)))))
+               ('t (let* (;; Str is sometimes empty when there's a valid query.
+                          ;; Prefer str when non-empty to avoid calculations
+                          ;; in the minibuffer but fall back if str is empty.
+                          (query (if (not (string-empty-p str))
+                                     str
+                                   (when-let* ((win (active-minibuffer-window)))
+                                     (with-current-buffer (window-buffer win)
+                                       (minibuffer-contents-no-properties))))))
                      (if (null query)
                          last-result
                        (let ((r (while-no-input
