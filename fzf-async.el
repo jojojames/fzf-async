@@ -586,22 +586,85 @@ Searches /Applications for *.app bundles and opens the selection with `open'."
 
 ;;;###autoload
 (defun fzf-async-swiper ()
-  "Search the current buffer with swiper.
-Placeholder — delegates to `swiper' until a native async
-implementation lands."
+  "Search the current buffer using fzf.
+Captures buffer content (including unsaved changes) to a temp file
+and searches it with grep.  Selects a line and jumps to it."
   (interactive)
-  (swiper))
+  (let* ((buffer (current-buffer))
+         (tmpfile (make-temp-file "fzf-async-swiper-"))
+         (grep (or (executable-find "grep")
+                   (user-error "grep not found in exec-path"))))
+    (unwind-protect
+        (progn
+          (with-temp-file tmpfile
+            (insert-buffer-substring buffer))
+          (when-let* ((r (fzf-async-completing-read
+                          :prompt "swiper: "
+                          :command (format "%s -n '.' %s"
+                                          (shell-quote-argument grep)
+                                          (shell-quote-argument tmpfile))
+                          :directory default-directory))
+                      (match (string-match "^\\([0-9]+\\):" r))
+                      (line (string-to-number (match-string 1 r))))
+            (switch-to-buffer buffer)
+            (goto-char (point-min))
+            (forward-line (1- line))))
+      (delete-file tmpfile))))
 
 ;;;###autoload
 (defun fzf-async-swiper-all ()
-  "Search all open buffers with swiper-all.
+  "Search all open buffers using fzf.
+Each buffer's content is written to a temp file indexed by position
+in the buffer list; grep searches all files recursively.  Selects a
+matching line and jumps to it in the originating buffer.
 
-Placeholder — delegates to `swiper-all' until a native
-async implementation lands."
+This is just a POC, will probably polish it later.."
   (interactive)
-  (swiper-all))
+  (let* ((buffers (cl-remove-if
+                   (lambda (b)
+                     (or (minibufferp b)
+                         (string-prefix-p " " (buffer-name b))))
+                   (buffer-list)))
+         (buf-vec (vconcat buffers))
+         (tmpdir (make-temp-file "fzf-async-swiper-all-" t))
+         (grep (or (executable-find "grep")
+                   (user-error "grep not found in exec-path"))))
+    (unwind-protect
+        (progn
+          (cl-loop for buf across buf-vec
+                   for i from 0
+                   do (with-temp-file
+                          (expand-file-name
+                           (format "%d-%s" i (fzf-async--sanitize-filename
+                                              (buffer-name buf)))
+                           tmpdir)
+                        (insert-buffer-substring buf)))
+          (when-let* ((r (fzf-async-completing-read
+                          :prompt "swiper-all: "
+                          :command (format "%s -rn '.' %s"
+                                          (shell-quote-argument grep)
+                                          (shell-quote-argument tmpdir))
+                          :directory default-directory))
+                      (pfx (file-name-as-directory tmpdir))
+                      ((string-prefix-p pfx r))
+                      (rel (substring r (length pfx)))
+                      ;; rel is "INDEX-bufname:LINE:content"; bufname has no ":"
+                      (match (string-match "^\\([0-9]+\\)-[^:]*:\\([0-9]+\\):" rel))
+                      (idx (string-to-number (match-string 1 rel)))
+                      (line (string-to-number (match-string 2 rel)))
+                      ((< idx (length buf-vec)))
+                      (buffer (aref buf-vec idx))
+                      ((buffer-live-p buffer)))
+            (switch-to-buffer buffer)
+            (goto-char (point-min))
+            (forward-line (1- line))))
+      (delete-directory tmpdir t))))
 
 ;;; Helpers
+
+(defun fzf-async--sanitize-filename (name)
+  "Replace filename-unsafe characters in NAME with hyphens."
+  (replace-regexp-in-string "[/\\*?<>|: ]" "-" name))
 
 (defun fzf-async--ssh-hosts ()
   "Return SSH host names from ~/.ssh/config, excluding wildcard patterns."
@@ -652,7 +715,9 @@ so fzf receives an initial empty-query argument."
     fzf-async-hg-files
     fzf-async-locate
     fzf-async-spotlight
-    fzf-async-spotlight-apps)
+    fzf-async-spotlight-apps
+    fzf-async-swiper
+    fzf-async-swiper-all)
   "All fzf-async commands that use `fzf-async-completing-read'.")
 
 (defcustom fzf-async-file-commands
