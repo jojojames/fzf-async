@@ -489,6 +489,18 @@ Selecting a candidate opens the file at that line."
     (find-file result)))
 
 ;;;###autoload
+(defun fzf-async-hg-files ()
+  "Find a tracked file in the current Mercurial repo using hg files."
+  (interactive)
+  (unless (locate-dominating-file default-directory ".hg")
+    (error "Not a Mercurial repo"))
+  (when-let* ((result (fzf-async-completing-read
+                       :prompt "hg files: "
+                       :command (fzf-async--normalize "hg files")
+                       :directory default-directory)))
+    (find-file result)))
+
+;;;###autoload
 (defun fzf-async-locate ()
   "Find a file system-wide using locate."
   (interactive)
@@ -597,6 +609,7 @@ so fzf receives an initial empty-query argument."
     fzf-async-grep-current-file
     fzf-async-ugrep
     fzf-async-git-ls-files
+    fzf-async-hg-files
     fzf-async-locate
     fzf-async-spotlight
     fzf-async-spotlight-apps)
@@ -608,6 +621,7 @@ so fzf receives an initial empty-query argument."
     fzf-async-rg-files
     fzf-async-ag-files
     fzf-async-git-ls-files
+    fzf-async-hg-files
     fzf-async-locate
     fzf-async-spotlight
     fzf-async-spotlight-apps)

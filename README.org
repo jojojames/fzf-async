@@ -150,6 +150,7 @@ All commands open the selected candidate in Emacs.
 | ~fzf-async-rg-files~     | —                   | ~consult-find~   |
 | ~fzf-async-ag-files~     | —                   | —                |
 | ~fzf-async-git-ls-files~ | ~counsel-git~       | —                |
+| ~fzf-async-hg-files~     | —                   | —                |
 | ~fzf-async-locate~       | ~counsel-locate~    | ~consult-locate~ |
 | ~fzf-async-spotlight~    | —                   | —                |
 | ~fzf-async-spotlight-apps~ | —                 | —                |
