@@ -1,0 +1,322 @@
+#+TITLE: fzf-async
+#+STARTUP: noindent
+
+This package provides async fuzzy completion for Emacs backed by
+[[https://github.com/dangduc/fzf-native][fzf-native]].
+A shell command streams candidates into a background reader thread;
+[[https://github.com/junegunn/fzf][fzf]] scores and sorts them in parallel
+across all available CPU cores; results land in a standard ~completing-read~
+UI incrementally as the shell command is still running.
+
+It is designed for candidate sets too large for synchronous completion —
+hundreds of thousands to millions of files or lines — where other solutions
+are too slow or don't match candidates fuzzily.
+
+* Why
+
+Existing async completion packages share a fundamental design problem: the
+user's query string is consumed in *two separate stages* by two different
+matching algorithms.
+
+Take ~consult-ripgrep~ as an example. The query is first passed directly to
+~rg~ as a pattern, narrowing the candidate pool at the shell level.  The
+survivors are then handed back to Emacs where the active ~completion-style~
+rescores and re-sorts them.  Those two stages may use incompatible matching
+semantics: ~rg~ applies regex or literal matching while the completion style
+applies its own fuzzy or flex logic.
+
+[[https://github.com/minad/consult#asynchronous-search][consult: asynchronous search]]
+
+~fzf-async~ eliminates the two-stage problem entirely. The shell command runs
+*without a query* and emits candidates unconditionally. The user's query is
+given *only* to fzf, which handles both filtering and scoring in a single,
+coherent pass.
+
+This is equivalent to calling ~fzf~ directly in the shell.
+
+** The fzf algorithm
+
+fzf uses a modified Smith-Waterman sequence alignment algorithm.  Every
+character of the query must appear in the candidate in order, but not
+necessarily consecutively — standard fuzzy matching.  Bonus points are
+awarded for matching at word boundaries, path component separators, and
+camelCase transitions, which causes semantically better matches to rank
+higher than incidental character matches.
+
+Scores are bounded non-negative integers (typically 0–10 000), which makes
+radix-style counting sort feasible and avoids the O(n log n) overhead of
+comparison sort for large candidate sets.
+
+- [[https://github.com/junegunn/fzf][fzf]] — original fzf written in Go
+- [[https://github.com/nvim-telescope/telescope-fzf-native.nvim][telescope-fzf-native.nvim]]
+  — C port of fzf
+- [[https://github.com/dangduc/fzf-native][fzf-native]] — Emacs wrapper
+
+** Multi-component filtering
+
+Queries may contain multiple space-separated terms.  All terms must match
+(AND semantics).  This mirrors the fzf command-line search syntax:
+
+| Syntax          | Meaning                                  |
+|-----------------+------------------------------------------|
+| ~foo bar~       | fuzzy-match both ~foo~ and ~bar~         |
+| ~'foo~          | exact substring match for ~foo~          |
+| ~^foo~          | prefix match for ~foo~                   |
+| ~foo$~          | suffix match for ~foo~                   |
+| ~!foo~          | exclude candidates matching ~foo~        |
+| ~foo \vert bar~ | OR: match ~foo~ or ~bar~                 |
+
+For example, typing ~el$ !test~ finds files ending in ~.el~ that do not
+contain ~test~.
+
+Refer to the full query syntax:
+[[https://github.com/nvim-telescope/telescope-fzf-native.nvim#telescope-fzf-nativenvim][telescope-fzf-native query syntax]]
+
+** Multithreaded scoring
+
+Specific to Emacs, scoring is performed by
+[[https://github.com/dangduc/fzf-native][fzf-native]],
+a C dynamic module that spawns multiple worker threads to split up the work.
+
+Both ~fussy~ and ~fzf-async~ are multithreaded at the C layer.  With ~fussy~,
+Emacs blocks until the full candidate list is scored and returned — suitable
+for in-memory lists.  ~fzf-async~ runs the shell command in a background
+process and incrementally refreshes the completion UI as candidates arrive
+and are scored.
+
+* Installation
+
+Minimal setup:
+
+#+begin_src emacs-lisp :tangle yes
+  (use-package fzf-native
+    :vc (:url "https://github.com/dangduc/fzf-native")
+    :config
+    (fzf-native-load-dyn))
+
+  (use-package fzf-async
+    :vc (:url "https://github.com/jojojames/fzf-async")
+    :config
+    (fzf-async-setup))
+#+end_src
+
+Recommended:
+
+#+begin_src emacs-lisp :tangle yes
+  (use-package fzf-native
+    :vc (:url "https://github.com/dangduc/fzf-native")
+    :config
+    (fzf-native-load-dyn))
+
+  (use-package fussy
+    :vc (:url "https://github.com/jojojames/fussy")
+    :config
+    (fussy-setup-fzf)
+    (fussy-eglot-setup)
+    (fussy-company-setup))
+
+  (use-package fzf-async
+    :vc (:url "https://github.com/jojojames/fzf-async")
+    :config
+    (fzf-async-setup))
+#+end_src
+
+This sets up a consistent ~completing-read~ and ~completion-in-region~
+experience using ~fzf~ as the core filtering/scoring algorithm.
+
+* Quick Start
+
+#+begin_src emacs-lisp :tangle yes
+  ;; Register the completion style.
+  (fzf-async-setup)
+
+  ;; Then call any command:
+  (fzf-async-git-ls-files)
+  (fzf-async-rg)
+  (fzf-async-fd)
+  (fzf-async-find)
+#+end_src
+
+* Commands
+
+All commands open the selected candidate in Emacs.
+
+** File finders
+
+| ~fzf-async~              | ~counsel~           | ~consult~        |
+|--------------------------+---------------------+------------------|
+| ~fzf-async-find~         | ~counsel-find-file~ | ~consult-find~   |
+| ~fzf-async-fd~           | —                   | ~consult-fd~     |
+| ~fzf-async-rg-files~     | —                   | ~consult-find~   |
+| ~fzf-async-ag-files~     | —                   | —                |
+| ~fzf-async-git-ls-files~ | ~counsel-git~       | —                |
+| ~fzf-async-locate~       | ~counsel-locate~    | ~consult-locate~ |
+| ~fzf-async-spotlight~    | —                   | —                |
+| ~fzf-async-spotlight-apps~ | —                 | —                |
+| ~fzf-async-spotlight-pdfs~ | —                 | —                |
+
+** Content search
+
+Grep-style commands parse ~FILE:LINE:CONTENT~ output and jump directly to
+the matching line.
+
+| ~fzf-async~                   | ~counsel~ / ~ivy~  | ~consult~            |
+|-------------------------------+--------------------+----------------------|
+| ~fzf-async-rg~                | ~counsel-rg~       | ~consult-ripgrep~    |
+| ~fzf-async-ag~                | ~counsel-ag~       | —                    |
+| ~fzf-async-git-grep~          | ~counsel-git-grep~ | ~consult-git-grep~   |
+| ~fzf-async-grep~              | ~counsel-grep~     | ~consult-grep~       |
+| ~fzf-async-grep-current-file~ | ~counsel-grep~     | ~consult-line~       |
+| ~fzf-async-ugrep~             | —                  | —                    |
+| ~fzf-async-swiper~            | ~swiper~           | ~consult-line~       |
+| ~fzf-async-swiper-all~        | ~swiper-all~       | ~consult-line-multi~ |
+
+* Completion style compatibility
+
+~fzf-async~ registers and uses its own ~completion-style~ named ~fzf-async~.
+This style is only a passthrough: it accepts the query string as-is and forwards
+it directly to the ~fzf~ scoring layer without applying any transformation.
+
+*This style must not be added to the global ~completion-styles~ list.*
+Doing so applies it to every ~completing-read~ in the session, including
+callers that pass a plain list or hash-table as the collection, which will
+trigger an error.  ~fzf-async-setup~ wires the style correctly via
+~completion-category-overrides~ for the ~fzf-async~ category only.  Other
+~completion-styles~ packages (e.g. ~orderless~, ~hotfuzz~) may override
+this.
+
+Do not set ~fzf-async~ as a fallback in ~completion-styles~.  Do not combine
+it with ~orderless~, ~fussy~, ~flex~, or any other style for the ~fzf-async~
+category — the results are already scored and sorted by fzf; re-filtering
+by another style corrupts the ranking.
+
+* Companion package — fussy
+
+The recommended companion package is
+[[https://github.com/jojojames/fussy][fussy]],
+for general ~completing-read~ and ~completion-at-point~ (e.g. code
+completion).  Both ~fussy~ and ~fzf-async~ are backed by the same
+[[https://github.com/dangduc/fzf-native][fzf-native]]
+module, giving you consistent fuzzy matching semantics with ~fzf~ across
+synchronous and asynchronous contexts.
+
+~fussy~ operates synchronously on in-memory candidate lists and integrates
+with ~company~, ~corfu~, ~eglot~, and all standard ~completing-read~
+frontends.  ~fzf-async~ handles the case where candidates come from a shell
+command (e.g. ~find~ or ~ripgrep~) and must be streamed incrementally.
+
+#+begin_src emacs-lisp :tangle yes
+  (use-package fzf-native
+    :vc (:url "https://github.com/dangduc/fzf-native")
+    :config
+    (fzf-native-load-dyn))
+
+  ;; Synchronous fuzzy completion for code, buffers, M-x, etc.
+  (use-package fussy
+    :vc (:url "https://github.com/jojojames/fussy")
+    :config
+    (fussy-setup-fzf)
+    (fussy-eglot-setup)
+    (fussy-company-setup))
+
+  ;; Async fuzzy completion for large file/grep searches.
+  (use-package fzf-async
+    :vc (:url "https://github.com/jojojames/fzf-async")
+    :config
+    (fzf-async-setup))
+#+end_src
+
+* Customization
+
+| Variable                   | Default | Description                        |
+|----------------------------+---------+------------------------------------|
+| ~fzf-async-max-candidates~ | 10000   | Max candidates returned to Elisp.  |
+| ~fzf-async-refresh-delay~  | 0.05    | Seconds between generation polls.  |
+| ~fzf-async-input-debounce~ | 0.2     | Idle seconds to retry after input. |
+| ~fzf-async-input-throttle~ | 0.5     | Min seconds between refreshes.     |
+
+The prompt overlay shows live status during a search:
+
+: DIR IDX/[FILTERED](TOTAL)
+
+- ~DIR~ — abbreviated working directory
+- ~IDX~ — current selection index in vertico
+- ~FILTERED~ — candidates passing the current fzf query
+- ~TOTAL~ — total candidates collected from the shell command so far
+
+* Custom commands
+
+~fzf-async~ is designed to be extensible.  New commands are a thin wrapper
+around ~fzf-async-completing-read~, which accepts keyword arguments:
+
+#+begin_src emacs-lisp :tangle yes
+;;;###autoload
+(defun fzf-async-spotlight-pdfs ()
+  "Find a PDF file system-wide using Spotlight.
+Opens the selected PDF with `open'."
+  (interactive)
+  (when-let* ((result (fzf-async-completing-read
+                       :prompt "spotlight: "
+                       :command (format "mdfind 'kMDItemFSName == \"*.pdf\"'"
+                                        (executable-find "mdfind"))
+                       :directory default-directory)))
+    (start-process "default-app" nil "open" result)))
+#+end_src
+
+| Argument     | Default             | Description                        |
+|--------------+---------------------+------------------------------------|
+| ~:prompt~    | ~"fzf > "~          | Minibuffer prompt string.          |
+| ~:command~   | ~find .~            | The shell command to run.          |
+| ~:directory~ | ~default-directory~ | Working directory for the command. |
+
+Use ~fzf-async--normalize~ to resolve the executable path and shell-quote
+arguments before passing the command string.
+
+* Comparison
+
+- ~fussy~ serves a similar role to ~orderless~: scoring and filtering for
+  general ~completing-read~ (M-x, buffers, code completion, etc.).
+- ~fzf-async~ serves a similar role to ~consult~/~counsel~, e.g.
+  ~counsel-rg~ / ~counsel-git~ / ~consult-ripgrep~ / ~consult-find~
+  for file and content search.
+- [[https://github.com/bling/fzf.el][fzf.el]] is another alternative that
+  serves as a frontend to the ~fzf~ binary.  It is a good option, though
+  it may feel alien to Emacs since all filtering has to be built up and
+  sent to the external process.
+- ~counsel-fzf~ is another option.  See the original implementation:
+  [[https://github.com/abo-abo/swiper/pull/1151][swiper: add counsel-fzf]]
+  The downside is that each new input resets the search, which is
+  extremely slow over millions of files.  This problem is shared with
+  ~consult~-related commands: each keystroke triggers a new filter query
+  to the underlying binary.
+
+In comparison to similar preexisting packages like ~Consult~/~Counsel~,
+~fzf-async~ provides:
+
+*Speed.* fzf scoring runs multithreaded in C with a counting-sort final
+pass that is O(n + max_score).  Results stream incrementally so the UI
+stays responsive with millions of candidates.  The goal is to match the
+performance of ~fzf~ in the terminal from within Emacs.
+
+*True fuzzy matching.* A single query string is used for both filtering
+and scoring in one pass — no two-stage conflict, no mismatches between
+what the shell tool matched and what the completion framework ranked.
+
+*Simplicity.* ~fzf-async.el~ is roughly 500 lines of Emacs Lisp, most of
+which declares the built-in commands.  ~fzf-native-module.c~ is roughly
+1000 lines.
+
+** Downsides
+~fzf-async~ requires
+[[https://github.com/dangduc/fzf-native][fzf-native]],
+a compiled C dynamic module that requires a C compiler and CMake to build.
+If a pure-Elisp solution is preferred,
+[[https://github.com/minad/consult][consult]]
+and [[https://github.com/abo-abo/swiper][counsel]] are mature, widely
+supported alternatives that require no native compilation.
+** Prior Discussions
+
+[[https://github.com/abo-abo/swiper/pull/1151][swiper: add counsel-fzf]]
+[[https://github.com/abo-abo/swiper/issues/848][swiper: fzf integration]]
+[[https://github.com/minad/consult/issues/587][consult: fzf integration]]
+[[https://github.com/minad/consult/discussions/1312][consult: async fzf]]
