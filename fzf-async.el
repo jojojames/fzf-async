@@ -159,7 +159,7 @@ Exact Copy of `fussy-make-fzf-highlight-pattern'."
                                      (prompt "fzf > ")
                                      command
                                      (directory default-directory))
-  "Run shell COMMAND and completing-read its output with async fzf scoring.
+  "Run shell COMMAND and completing-read its output.
 
 :PROMPT     Minibuffer prompt string.  Defaults to \"fzf > \".
 :COMMAND    Shell command whose stdout lines become candidates.
@@ -276,7 +276,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
 
 ;;;###autoload
 (defun fzf-async-find ()
-  "Find a file under `default-directory' using find and async fzf scoring."
+  "Find a file under `default-directory' using find."
   (interactive)
   (when-let* ((result (fzf-async-completing-read
                        :prompt "find: "
@@ -286,7 +286,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
 
 ;;;###autoload
 (defun fzf-async-fd ()
-  "Find a file under `default-directory' using fd and async fzf scoring."
+  "Find a file under `default-directory' using fd."
   (interactive)
   (when-let* ((result (fzf-async-completing-read
                        :prompt "fd: "
@@ -296,7 +296,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
 
 ;;;###autoload
 (defun fzf-async-rg-files ()
-  "Find a file under `default-directory' using rg --files and async fzf scoring."
+  "Find a file under `default-directory' using rg --files."
   (interactive)
   (when-let* ((result (fzf-async-completing-read
                        :prompt "rg files: "
@@ -306,7 +306,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
 
 ;;;###autoload
 (defun fzf-async-ag-files ()
-  "Find a file under `default-directory' using rg --files and async fzf scoring."
+  "Find a file under `default-directory' using ag."
   (interactive)
   (when-let* ((result (fzf-async-completing-read
                        :prompt "ag files: "
@@ -316,7 +316,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
 
 ;;;###autoload
 (defun fzf-async-rg ()
-  "Search file contents under `default-directory' with rg and async fzf scoring.
+  "Search file contents under `default-directory' with rg.
 Streams all file contents as FILE:LINE:CONTENT; type to fuzzy-filter across them.
 Selecting a candidate opens the file at that line."
   (interactive)
@@ -334,7 +334,7 @@ Selecting a candidate opens the file at that line."
 
 ;;;###autoload
 (defun fzf-async-ag ()
-  "Search file contents under `default-directory' with rg and async fzf scoring.
+  "Search file contents under `default-directory' with ag.
 Streams all file contents as FILE:LINE:CONTENT; type to fuzzy-filter across them.
 Selecting a candidate opens the file at that line."
   (interactive)
@@ -352,7 +352,7 @@ Selecting a candidate opens the file at that line."
 
 ;;;###autoload
 (defun fzf-async-git-grep ()
-  "Search file contents under `default-directory' with git grep and async fzf scoring.
+  "Search file contents under `default-directory' with git grep.
 Streams all file contents as FILE:LINE:CONTENT; type to fuzzy-filter across them.
 Selecting a candidate opens the file at that line."
   (interactive)
@@ -371,7 +371,7 @@ Selecting a candidate opens the file at that line."
 
 ;;;###autoload
 (defun fzf-async-grep ()
-  "Search file contents under `default-directory' with git grep and async fzf scoring.
+  "Search file contents under `default-directory' with grep.
 Streams all file contents as FILE:LINE:CONTENT; type to fuzzy-filter across them.
 Selecting a candidate opens the file at that line."
   (interactive)
@@ -388,9 +388,9 @@ Selecting a candidate opens the file at that line."
 
 ;;;###autoload
 (defun fzf-async-grep-current-file ()
-  "Search file contents under `default-directory' with git grep and async fzf scoring.
-Streams all file contents as FILE:LINE:CONTENT; type to fuzzy-filter across them.
-Selecting a candidate opens the file at that line."
+  "Search the current buffer's file with grep.
+Streams non-blank lines as LINE:CONTENT; type to fuzzy-filter across them.
+Selecting a candidate jumps to that line in the file."
   (interactive)
   (when-let* ((bf buffer-file-name) ;; Track buffer.
               (r (fzf-async-completing-read
@@ -407,7 +407,7 @@ Selecting a candidate opens the file at that line."
 
 ;;;###autoload
 (defun fzf-async-ugrep ()
-  "Search file contents under `default-directory' with git grep and async fzf scoring.
+  "Search file contents under `default-directory' with ugrep.
 Streams all file contents as FILE:LINE:CONTENT; type to fuzzy-filter across them.
 Selecting a candidate opens the file at that line."
   (interactive)
@@ -424,9 +424,7 @@ Selecting a candidate opens the file at that line."
 
 ;;;###autoload
 (defun fzf-async-git-ls-files ()
-  "Search file contents under `default-directory' with git ls files and async fzf scoring.
-Streams all file contents as FILE:LINE:CONTENT; type to fuzzy-filter across them.
-Selecting a candidate opens the file at that line."
+  "Find a tracked file in the current Git repo using git ls-files."
   (interactive)
   (unless (locate-dominating-file default-directory ".git")
     (error "Not a Git repo"))
@@ -438,9 +436,7 @@ Selecting a candidate opens the file at that line."
 
 ;;;###autoload
 (defun fzf-async-locate ()
-  "Search file contents under `default-directory' with git ls files and async fzf scoring.
-Streams all file contents as FILE:LINE:CONTENT; type to fuzzy-filter across them.
-Selecting a candidate opens the file at that line."
+  "Find a file system-wide using locate."
   (interactive)
   (when-let* ((result (fzf-async-completing-read
                        :prompt "locate: "
@@ -450,9 +446,8 @@ Selecting a candidate opens the file at that line."
 
 ;;;###autoload
 (defun fzf-async-spotlight ()
-  "Search file contents under `default-directory' with git ls files and async fzf scoring.
-Streams all file contents as FILE:LINE:CONTENT; type to fuzzy-filter across them.
-Selecting a candidate opens the file at that line."
+  "Find a file system-wide using Spotlight (mdfind).
+.app bundles are opened with `open'; all other results open with `find-file'."
   (interactive)
   (when-let* ((result (fzf-async-completing-read
                        :prompt "spotlight: "
@@ -465,9 +460,8 @@ Selecting a candidate opens the file at that line."
 
 ;;;###autoload
 (defun fzf-async-spotlight-apps ()
-  "Search file contents under `default-directory' with git ls files and async fzf scoring.
-Streams all file contents as FILE:LINE:CONTENT; type to fuzzy-filter across them.
-Selecting a candidate opens the file at that line."
+  "Find an installed application using Spotlight.
+Searches /Applications for *.app bundles and opens the selection with `open'."
   (interactive)
   (when-let* ((result (fzf-async-completing-read
                        :prompt "spotlight: "
@@ -478,9 +472,8 @@ Selecting a candidate opens the file at that line."
 
 ;;;###autoload
 (defun fzf-async-spotlight-pdfs ()
-  "Search file contents under `default-directory' with git ls files and async fzf scoring.
-Streams all file contents as FILE:LINE:CONTENT; type to fuzzy-filter across them.
-Selecting a candidate opens the file at that line."
+  "Find a PDF file system-wide using Spotlight.
+Opens the selected PDF with `open'."
   (interactive)
   (when-let* ((result (fzf-async-completing-read
                        :prompt "spotlight: "
@@ -491,27 +484,25 @@ Selecting a candidate opens the file at that line."
 
 ;;;###autoload
 (defun fzf-async-swiper ()
-  "Search file contents under `default-directory' with git ls files and async fzf scoring.
-Streams all file contents as FILE:LINE:CONTENT; type to fuzzy-filter across them.
-Selecting a candidate opens the file at that line."
+  "Search the current buffer with swiper.
+Placeholder — delegates to `swiper' until a native async implementation lands."
   (interactive)
   (swiper))
 
 ;;;###autoload
 (defun fzf-async-swiper-all ()
-  "Search file contents under `default-directory' with git ls files and async fzf scoring.
-Streams all file contents as FILE:LINE:CONTENT; type to fuzzy-filter across them.
-Selecting a candidate opens the file at that line."
+  "Search all open buffers with swiper-all.
+Placeholder — delegates to `swiper-all' until a native async implementation lands."
   (interactive)
   (swiper-all))
 
 ;;; Helpers
 
 (defun fzf-async--normalize (command)
-  "Normalize COMMAND.
-
-Run `executable-find' on COMMAND to find real path.
-Shell quote arguments."
+  "Resolve and shell-quote COMMAND for use with `fzf-async-completing-read'.
+The first word is looked up via `executable-find'; all arguments are
+shell-quoted.  The sentinel value `\\='\\='' is converted to an empty string
+so fzf receives an initial empty-query argument."
   (let* ((parts (split-string-and-unquote command))
          (program (car parts))
          (args (mapcar
