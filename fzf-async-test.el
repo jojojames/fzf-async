@@ -56,6 +56,129 @@
     (should-error (fzf-async--normalize "nonexistent-prog-xyz")
                   :type 'user-error)))
 
+;;; fzf-async--deduplicate-dirs
+
+(ert-deftest fzf-async-deduplicate-dirs-no-overlap ()
+  "Unrelated directories are all kept."
+  (should (equal (sort (fzf-async--deduplicate-dirs
+                        '("/a/b/" "/c/d/" "/e/f/"))
+                       #'string<)
+                 '("/a/b/" "/c/d/" "/e/f/"))))
+
+(ert-deftest fzf-async-deduplicate-dirs-drops-subdirectory ()
+  "A subdirectory is dropped when its parent is present."
+  (should (equal (fzf-async--deduplicate-dirs
+                  '("/home/user/project/" "/home/user/project/src/"))
+                 '("/home/user/project/"))))
+
+(ert-deftest fzf-async-deduplicate-dirs-keeps-sibling-dirs ()
+  "Sibling directories (same parent, different names) are both kept."
+  (let ((result (fzf-async--deduplicate-dirs
+                 '("/home/user/foo/" "/home/user/bar/"))))
+    (should (member "/home/user/foo/" result))
+    (should (member "/home/user/bar/" result))))
+
+(ert-deftest fzf-async-deduplicate-dirs-removes-exact-duplicates ()
+  "Exact duplicate entries are collapsed to one."
+  (should (equal (fzf-async--deduplicate-dirs
+                  '("/a/b/" "/a/b/" "/a/b/"))
+                 '("/a/b/"))))
+
+(ert-deftest fzf-async-deduplicate-dirs-deep-nesting ()
+  "Only the shallowest ancestor survives when multiple levels are present."
+  (let ((result (fzf-async--deduplicate-dirs
+                 '("/a/" "/a/b/" "/a/b/c/" "/a/b/c/d/"))))
+    (should (equal result '("/a/")))))
+
+(ert-deftest fzf-async-deduplicate-dirs-empty-input ()
+  "Empty input returns nil."
+  (should (null (fzf-async--deduplicate-dirs '()))))
+
+;;; fzf-async--sanitize-filename
+
+(ert-deftest fzf-async-sanitize-filename-replaces-slash ()
+  (should (string= (fzf-async--sanitize-filename "a/b") "a-b")))
+
+(ert-deftest fzf-async-sanitize-filename-replaces-space ()
+  (should (string= (fzf-async--sanitize-filename "foo bar") "foo-bar")))
+
+(ert-deftest fzf-async-sanitize-filename-replaces-colon ()
+  (should (string= (fzf-async--sanitize-filename "buf:name") "buf-name")))
+
+(ert-deftest fzf-async-sanitize-filename-plain-name-unchanged ()
+  (should (string= (fzf-async--sanitize-filename "plain-name") "plain-name")))
+
+;;; fzf-async--project-dir
+
+(ert-deftest fzf-async-project-dir-nil-backend-returns-default-directory ()
+  "With nil backend, returns `default-directory'."
+  (let ((fzf-async-project-backend nil)
+        (default-directory "/some/dir/"))
+    (should (string= (fzf-async--project-dir) "/some/dir/"))))
+
+(ert-deftest fzf-async-project-dir-project-backend-uses-project-root ()
+  "With `project' backend, returns the project root when in a project."
+  (let ((fzf-async-project-backend 'project))
+    (cl-letf (((symbol-function 'project-current)
+               (lambda (&rest _) '(vc Git "/mock/project/")))
+              ((symbol-function 'project-root)
+               (lambda (_) "/mock/project/")))
+      (should (string= (fzf-async--project-dir) "/mock/project/")))))
+
+(ert-deftest fzf-async-project-dir-project-backend-fallback ()
+  "With `project' backend, falls back to `default-directory' outside a project."
+  (let ((fzf-async-project-backend 'project)
+        (default-directory "/fallback/"))
+    (cl-letf (((symbol-function 'project-current) (lambda (&rest _) nil)))
+      (should (string= (fzf-async--project-dir) "/fallback/")))))
+
+(ert-deftest fzf-async-project-dir-custom-function ()
+  "A function value is called and its return value used."
+  (let ((fzf-async-project-backend (lambda () "/custom/root/")))
+    (should (string= (fzf-async--project-dir) "/custom/root/"))))
+
+;;; fzf-async-swiper line collection
+
+(ert-deftest fzf-async-swiper-line-format ()
+  "Lines are formatted as LINE:content with 1-based numbering."
+  (with-temp-buffer
+    (insert "alpha\nbeta\ngamma\n")
+    (let* ((candidates
+            (let (lines)
+              (save-excursion
+                (goto-char (point-min))
+                (let ((i 1))
+                  (while (not (eobp))
+                    (let ((content (buffer-substring-no-properties
+                                    (line-beginning-position)
+                                    (line-end-position))))
+                      (unless (string-empty-p content)
+                        (push (format "%d:%s" i content) lines)))
+                    (forward-line 1)
+                    (cl-incf i))))
+              (nreverse lines))))
+      (should (equal candidates '("1:alpha" "2:beta" "3:gamma"))))))
+
+(ert-deftest fzf-async-swiper-skips-empty-lines ()
+  "Empty lines are excluded from candidates."
+  (with-temp-buffer
+    (insert "first\n\nthird\n")
+    (let* ((candidates
+            (let (lines)
+              (save-excursion
+                (goto-char (point-min))
+                (let ((i 1))
+                  (while (not (eobp))
+                    (let ((content (buffer-substring-no-properties
+                                    (line-beginning-position)
+                                    (line-end-position))))
+                      (unless (string-empty-p content)
+                        (push (format "%d:%s" i content) lines)))
+                    (forward-line 1)
+                    (cl-incf i))))
+              (nreverse lines))))
+      (should (equal candidates '("1:first" "3:third"))))))
+
 ;;; fzf-async--ssh-hosts
 
 (defmacro fzf-async-test--with-ssh-config (content &rest body)
