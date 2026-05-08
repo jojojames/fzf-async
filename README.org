@@ -262,6 +262,10 @@ each input change.
 
 Caveat: I mostly use ~vertico~ these days so wasn't exhaustive with using the
 other completion systems.
+** transient
+A [[https://github.com/jojojames/matcha/blob/master/matcha-fzf-async.el][matcha transient]] is
+ defined for invoking all ~fzf-async~ commands from a
+single keybinding via [[https://github.com/jojojames/matcha][matcha]].
 ** ivy / counsel
 
 Ivy uses a *push model*: the completion UI holds its own internal candidate

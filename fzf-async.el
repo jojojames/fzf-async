@@ -790,27 +790,5 @@ Call this once during init before using `fzf-async-completing-read'."
                                      'fzf-async-file
                                    'fzf-async))))))
 
-;; (transient-define-prefix matcha-fzf-async ()
-;;   "fzf"
-;;   [["Find Files"
-;;     ("f" "Find" fzf-async-find)
-;;     ("d" "Fd" fzf-async-fd)
-;;     ("r" "Rg" fzf-async-rg-files)
-;;     ("a" "Ag" fzf-async-ag-files)]
-;;    ["Git"
-;;     ("g" "Git Ls-Files" fzf-async-git-ls-files)
-;;     ("G" "Git Grep" fzf-async-git-grep)]
-;;    ["Grep"
-;;     ("F" "Grep Current File" fzf-async-grep-current-file)
-;;     ("g" "Grep" fzf-async-grep)
-;;     ("R" "Rg" fzf-async-rg)
-;;     ("A" "Ag" fzf-async-ag)]
-;;    ["Search"
-;;     ("l" "Locate" fzf-async-locate)
-;;     ("s" "Spotlight" fzf-async-spotlight)]
-;;    ["Swiper"
-;;     ("w" "Swiper" fzf-async-swiper)
-;;     ("W" "Swiper All" fzf-async-swiper-all)]])
-
 (provide 'fzf-async)
 ;;; fzf-async.el ends here
