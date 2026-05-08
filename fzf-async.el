@@ -93,6 +93,18 @@ terminals that do not render faces well."
   :type 'boolean
   :group 'fzf-async)
 
+(defcustom fzf-async-project-backend 'project
+  "How to resolve the root directory for fzf-async commands.
+project    Use `project.el' to find the project root (default, matches consult).
+projectile Use `projectile-project-root'.
+nil        Use `default-directory' (no project detection).
+function   Call the function with no arguments; it should return a directory string."
+  :type '(choice (const :tag "project.el" project)
+                 (const :tag "Projectile" projectile)
+                 (const :tag "None (default-directory)" nil)
+                 (function :tag "Custom function"))
+  :group 'fzf-async)
+
 ;;; Completion style
 
 (defun fzf-async-try-completion (string _table _pred _point)
@@ -369,7 +381,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
   (when-let* ((result (fzf-async-completing-read
                        :prompt "find: "
                        :command (fzf-async--normalize "find .")
-                       :directory default-directory)))
+                       :directory (fzf-async--project-dir))))
     (find-file result)))
 
 ;;;###autoload
@@ -379,7 +391,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
   (when-let* ((result (fzf-async-completing-read
                        :prompt "fd: "
                        :command (fzf-async--normalize "fd --no-ignore")
-                       :directory default-directory)))
+                       :directory (fzf-async--project-dir))))
     (find-file result)))
 
 ;;;###autoload
@@ -389,7 +401,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
   (when-let* ((result (fzf-async-completing-read
                        :prompt "rg files: "
                        :command (fzf-async--normalize "rg --files")
-                       :directory default-directory)))
+                       :directory (fzf-async--project-dir))))
     (find-file result)))
 
 ;;;###autoload
@@ -399,7 +411,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
   (when-let* ((result (fzf-async-completing-read
                        :prompt "ag files: "
                        :command (fzf-async--normalize "ag -g .")
-                       :directory default-directory)))
+                       :directory (fzf-async--project-dir))))
     (find-file result)))
 
 ;;;###autoload
@@ -413,7 +425,7 @@ Selecting a candidate opens the file at that line."
                   :prompt "rg: "
                   :command (fzf-async--normalize
                             "rg  --line-number --no-heading --with-filename ''")
-                  :directory default-directory))
+                  :directory (fzf-async--project-dir)))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
               (line (string-to-number (match-string 2 r))))
@@ -432,7 +444,7 @@ Selecting a candidate opens the file at that line."
                   :prompt "ag: "
                   :command (fzf-async--normalize
                             "ag --nocolor --nogroup --line-number \".\"")
-                  :directory default-directory))
+                  :directory (fzf-async--project-dir)))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
               (line (string-to-number (match-string 2 r))))
@@ -452,7 +464,7 @@ Selecting a candidate opens the file at that line."
   (when-let* ((r (fzf-async-completing-read
                   :prompt "git grep: "
                   :command (fzf-async--normalize "git --no-pager grep -n \"\"")
-                  :directory default-directory))
+                  :directory (fzf-async--project-dir)))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
               (line (string-to-number (match-string 2 r))))
@@ -470,7 +482,7 @@ Selecting a candidate opens the file at that line."
   (when-let* ((r (fzf-async-completing-read
                   :prompt "grep: "
                   :command (fzf-async--normalize "grep -Rn ''")
-                  :directory default-directory))
+                  :directory (fzf-async--project-dir)))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
               (line (string-to-number (match-string 2 r))))
@@ -490,7 +502,7 @@ Selecting a candidate jumps to that line in the file."
                   :command (fzf-async--normalize
                             (format "grep -vn '^[[:space:]]*$' %s"
                                     buffer-file-name))
-                  :directory default-directory))
+                  :directory (fzf-async--project-dir)))
               (match (string-match "^\\([0-9]+\\):\\(.*\\)$" r))
               (line (string-to-number (match-string 1 r))))
     (find-file bf) ;; In case they swapped windows.
@@ -508,7 +520,7 @@ Selecting a candidate opens the file at that line."
   (when-let* ((r (fzf-async-completing-read
                   :prompt "ugrep: "
                   :command (fzf-async--normalize "ugrep -RIn --no-heading ''")
-                  :directory default-directory))
+                  :directory (fzf-async--project-dir)))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
               (line (string-to-number (match-string 2 r))))
@@ -525,7 +537,7 @@ Selecting a candidate opens the file at that line."
   (when-let* ((result (fzf-async-completing-read
                        :prompt "git ls files: "
                        :command (fzf-async--normalize "git ls-files")
-                       :directory default-directory)))
+                       :directory (fzf-async--project-dir))))
     (find-file result)))
 
 ;;;###autoload
@@ -537,7 +549,7 @@ Selecting a candidate opens the file at that line."
   (when-let* ((result (fzf-async-completing-read
                        :prompt "hg files: "
                        :command (fzf-async--normalize "hg files")
-                       :directory default-directory)))
+                       :directory (fzf-async--project-dir))))
     (find-file result)))
 
 ;;;###autoload
@@ -547,7 +559,7 @@ Selecting a candidate opens the file at that line."
   (when-let* ((result (fzf-async-completing-read
                        :prompt "locate: "
                        :command (fzf-async--normalize "locate ''")
-                       :directory default-directory)))
+                       :directory (fzf-async--project-dir))))
     (find-file result)))
 
 ;;;###autoload
@@ -559,7 +571,7 @@ Selecting a candidate opens the file at that line."
                        :prompt "spotlight: "
                        :command (fzf-async--normalize "mdfind .")
                        ;; :command (fzf-async--normalize "mdfind . 2>/dev/null")
-                       :directory default-directory)))
+                       :directory (fzf-async--project-dir))))
     (if (string-suffix-p ".app" result)
         (start-process "default-app" nil "open" result)
       (find-file result))))
@@ -573,7 +585,7 @@ Searches /Applications for *.app bundles and opens the selection with `open'."
                        :prompt "spotlight: "
                        :command (format "%s 'kMDItemFSName == \"*.app\"'"
                                         (executable-find "mdfind"))
-                       :directory default-directory)))
+                       :directory (fzf-async--project-dir))))
     (start-process "default-app" nil "open" result)))
 
 ;;;###autoload
@@ -603,7 +615,7 @@ and searches it with grep.  Selects a line and jumps to it."
                           :command (format "%s -n '.' %s"
                                           (shell-quote-argument grep)
                                           (shell-quote-argument tmpfile))
-                          :directory default-directory))
+                          :directory (fzf-async--project-dir)))
                       (match (string-match "^\\([0-9]+\\):" r))
                       (line (string-to-number (match-string 1 r))))
             (switch-to-buffer buffer)
@@ -644,7 +656,7 @@ This is just a POC, will probably polish it later.."
                           :command (format "%s -rn '.' %s"
                                           (shell-quote-argument grep)
                                           (shell-quote-argument tmpdir))
-                          :directory default-directory))
+                          :directory (fzf-async--project-dir)))
                       (pfx (file-name-as-directory tmpdir))
                       ((string-prefix-p pfx r))
                       (rel (substring r (length pfx)))
@@ -661,6 +673,20 @@ This is just a POC, will probably polish it later.."
       (delete-directory tmpdir t))))
 
 ;;; Helpers
+
+(defun fzf-async--project-dir ()
+  "Return the root directory for fzf-async commands.
+Respects `fzf-async-project-backend'; falls back to `default-directory'."
+  (or (pcase fzf-async-project-backend
+        ((pred functionp)
+         (funcall fzf-async-project-backend))
+        ('project
+         (when-let* ((pr (project-current)))
+           (project-root pr)))
+        ('projectile
+         (when (bound-and-true-p projectile-mode)
+           (projectile-project-root))))
+      default-directory))
 
 (defun fzf-async--sanitize-filename (name)
   "Replace filename-unsafe characters in NAME with hyphens."

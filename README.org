@@ -289,12 +289,14 @@ Help appreciated.
 
 * Customization
 
-| Variable                   | Default | Description                                          |
-|----------------------------+---------+------------------------------------------------------|
-| ~fzf-async-max-candidates~ | 10000   | Max candidates returned to Elisp (see note below).  |
-| ~fzf-async-refresh-delay~  | 0.05    | Seconds between generation polls.                   |
-| ~fzf-async-input-debounce~ | 0.2     | Idle seconds to retry after input.                  |
-| ~fzf-async-input-throttle~ | 0.5     | Min seconds between refreshes.                      |
+| Variable                      | Default   | Description                                          |
+|-------------------------------+-----------+------------------------------------------------------|
+| ~fzf-async-max-candidates~    | 10000     | Max candidates returned to Elisp (see note below).  |
+| ~fzf-async-refresh-delay~     | 0.05      | Seconds between generation polls.                   |
+| ~fzf-async-input-debounce~    | 0.2       | Idle seconds to retry after input.                  |
+| ~fzf-async-input-throttle~    | 0.5       | Min seconds between refreshes.                      |
+| ~fzf-async-project-backend~   | ~project~ | How to resolve the root directory (see note below). |
+| ~fzf-async-highlight~         | ~t~       | Highlight matched characters in candidates.         |
 
 ~fzf-async-max-candidates~ caps only the number of strings consed into the
 Emacs list returned to the completion UI.  The C layer always scores and
@@ -308,6 +310,23 @@ part of the algorithm. Even converting C strings to Emacs strings can be a burde
 when the total collection size is millions of candidates. In practice, the cap
 should not be an issue (and is configurable anyways) since it's returning the top N
 candidates at any one time.
+
+~fzf-async-project-backend~ controls which directory file-search and grep commands
+run in.  The default ~project~ matches the behavior of ~consult~.  Available values:
+
+| Value        | Behavior                                                              |
+|--------------+-----------------------------------------------------------------------|
+| ~project~    | Uses ~project.el~ (~project-current~ / ~project-root~).  Default.    |
+| ~projectile~ | Uses ~projectile-project-root~ when ~projectile-mode~ is active.     |
+| ~nil~        | Uses ~default-directory~ unchanged (no project detection).           |
+| /function/   | Calls the function with no arguments; it should return a directory.  |
+
+Example with a custom function:
+
+#+begin_src emacs-lisp :tangle yes
+  (setq fzf-async-project-backend
+        (lambda () (locate-dominating-file default-directory ".git")))
+#+end_src
 
 The prompt overlay shows live status during a search:
 
