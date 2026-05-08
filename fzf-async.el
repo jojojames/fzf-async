@@ -98,7 +98,8 @@ terminals that do not render faces well."
 project    Use `project.el' to find the project root (default, matches consult).
 projectile Use `projectile-project-root'.
 nil        Use `default-directory' (no project detection).
-function   Call the function with no arguments; it should return a directory string."
+function   Call the function with no arguments;
+ it should return a directory string."
   :type '(choice (const :tag "project.el" project)
                  (const :tag "Projectile" projectile)
                  (const :tag "None (default-directory)" nil)
