@@ -388,6 +388,35 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
       (when stats-overlay (delete-overlay stats-overlay))
       (when handle (fzf-native-async-stop handle)))))
 
+(cl-defun fzf-sync-completing-read (&key
+                                    candidates
+                                    (prompt "fzf > ")
+                                    (category 'fzf-async))
+  "Run completing-read over CANDIDATES using fzf-native for scoring.
+
+:CANDIDATES List of strings to score with `fzf-native-score-all'.
+:PROMPT     Minibuffer prompt string.  Defaults to \"fzf > \".
+:CATEGORY   Completion category symbol.  Defaults to `fzf-async'.
+            Use `fzf-async-file' for file-path candidates so marginalia
+            can annotate them with file metadata."
+  (completing-read
+   prompt
+   (lambda (str _pred action)
+     (pcase action
+       ('metadata `(metadata (category . ,category)
+                             (display-sort-function . identity)
+                             (cycle-sort-function . identity)))
+       (`(boundaries . ,_) (cons 0 0))
+       ('t (let ((query (if (not (string-empty-p str))
+                            str
+                          (when-let* ((win (active-minibuffer-window)))
+                            (with-current-buffer (window-buffer win)
+                              (minibuffer-contents-no-properties))))))
+             (if (or (null query) (string-empty-p query))
+                 candidates
+               (fzf-native-score-all candidates query))))))
+   nil t nil nil nil))
+
 ;;; Commands
 
 ;;;###autoload
@@ -567,6 +596,44 @@ Selecting a candidate opens the file at that line."
                        :command (fzf-async--normalize "hg files")
                        :directory (fzf-async--project-dir))))
     (find-file result)))
+
+;;;###autoload
+(defun fzf-async-recent-file ()
+  "Find a recently visited file using `recentf'."
+  (interactive)
+  (require 'recentf)
+  (recentf-mode 1)
+  (unless recentf-list
+    (user-error "No recent files"))
+  (when-let* ((result (fzf-sync-completing-read :candidates recentf-list
+                                                :prompt "recent: "
+                                                :category 'fzf-async-file)))
+    (find-file result)))
+
+;;;###autoload
+(defun fzf-async-buffer ()
+  "Switch to an open buffer."
+  (interactive)
+  (let* ((names (cl-loop for b in (buffer-list)
+                          unless (or (minibufferp b)
+                                     (string-prefix-p " " (buffer-name b)))
+                          collect (buffer-name b))))
+    (when-let* ((result (fzf-sync-completing-read
+                         :candidates names :prompt "buffer: ")))
+      (switch-to-buffer result))))
+
+;;;###autoload
+(defun fzf-async-bookmark ()
+  "Jump to a bookmark."
+  (interactive)
+  (require 'bookmark)
+  (bookmark-maybe-load-default-file)
+  (let ((names (bookmark-all-names)))
+    (unless names
+      (user-error "No bookmarks defined"))
+    (when-let* ((result (fzf-sync-completing-read
+                         :candidates names :prompt "bookmark: ")))
+      (bookmark-jump result))))
 
 ;;;###autoload
 (defun fzf-async-locate ()

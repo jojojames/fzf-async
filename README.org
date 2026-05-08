@@ -164,17 +164,25 @@ All commands open the selected candidate in Emacs.
 
 ** File finders
 
-| ~fzf-async~                | ~counsel~           | ~consult~        |
-|----------------------------+---------------------+------------------|
-| ~fzf-async-find~           | ~counsel-find-file~ | ~consult-find~   |
-| ~fzf-async-fd~             | —                   | ~consult-fd~     |
-| ~fzf-async-rg-files~       | —                   | ~consult-find~   |
-| ~fzf-async-ag-files~       | —                   | —                |
-| ~fzf-async-git-ls-files~   | ~counsel-git~       | —                |
-| ~fzf-async-hg-files~       | —                   | —                |
-| ~fzf-async-locate~         | ~counsel-locate~    | ~consult-locate~ |
-| ~fzf-async-spotlight~      | —                   | —                |
-| ~fzf-async-spotlight-apps~ | —                   | —                |
+| ~fzf-async~                | ~counsel~           | ~consult~               |
+|----------------------------+---------------------+-------------------------|
+| ~fzf-async-find~           | ~counsel-find-file~ | ~consult-find~          |
+| ~fzf-async-fd~             | —                   | ~consult-fd~            |
+| ~fzf-async-rg-files~       | —                   | ~consult-find~          |
+| ~fzf-async-ag-files~       | —                   | —                       |
+| ~fzf-async-git-ls-files~   | ~counsel-git~       | —                       |
+| ~fzf-async-hg-files~       | —                   | —                       |
+| ~fzf-async-recent-file~    | ~counsel-recentf~   | ~consult-recent-file~   |
+| ~fzf-async-locate~         | ~counsel-locate~    | ~consult-locate~        |
+| ~fzf-async-spotlight~      | —                   | —                       |
+| ~fzf-async-spotlight-apps~ | —                   | —                       |
+
+** Emacs based
+
+| ~fzf-async~             | ~counsel~              | ~consult~           |
+|-------------------------+------------------------+---------------------|
+| ~fzf-async-buffer~      | ~ivy-switch-buffer~    | ~consult-buffer~    |
+| ~fzf-async-bookmark~    | ~counsel-bookmark~     | ~consult-bookmark~  |
 
 ** Content search
 
