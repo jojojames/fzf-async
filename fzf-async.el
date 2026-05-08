@@ -83,21 +83,20 @@ more CPU on the polling loop.  Analogous to `consult-async-refresh-delay'."
   :type 'float
   :group 'fzf-async)
 
-(defcustom fzf-async-input-debounce 0.2
+(defcustom fzf-async-input-debounce 0.1
   "Seconds of idle time to wait before retrying after interrupted scoring.
 When the user types fast, `while-no-input' aborts the scoring call.  This
 idle timer fires once typing pauses and re-triggers the display so results
-self-heal.  Analogous to `consult-async-input-debounce'."
+self-heal."
   :type 'float
   :group 'fzf-async)
 
-(defcustom fzf-async-input-throttle 0.5
+(defcustom fzf-async-input-throttle 0.2
   "Minimum seconds between display refreshes driven by new incoming data.
 Even when new candidate generations arrive continuously (e.g. a fast `find'
 streaming thousands of files), the completion UI is only re-exhibited once
 per this interval.  The debounce retry path is unaffected — after the user
-pauses typing the display always self-heals regardless of this value.
-Analogous to `consult-async-input-throttle'."
+pauses typing the display always self-heals regardless of this value."
   :type 'float
   :group 'fzf-async)
 

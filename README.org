@@ -316,8 +316,8 @@ Help appreciated.
 |-------------------------------+-----------+------------------------------------------------------|
 | ~fzf-async-max-candidates~    | 10000     | Max candidates returned to Elisp (see note below).  |
 | ~fzf-async-refresh-delay~     | 0.05      | Seconds between generation polls.                   |
-| ~fzf-async-input-debounce~    | 0.2       | Idle seconds to retry after input.                  |
-| ~fzf-async-input-throttle~    | 0.5       | Min seconds between refreshes.                      |
+| ~fzf-async-input-debounce~    | 0.1       | Idle seconds to retry after input.                  |
+| ~fzf-async-input-throttle~    | 0.2       | Min seconds between refreshes.                      |
 | ~fzf-async-project-backend~   | ~project~ | How to resolve the root directory (see note below). |
 | ~fzf-async-highlight~         | ~t~       | Highlight matched characters in candidates.         |
 
