@@ -321,6 +321,16 @@ Help appreciated.
 | ~fzf-async-project-backend~   | ~project~ | How to resolve the root directory (see note below). |
 | ~fzf-async-highlight~         | ~t~       | Highlight matched characters in candidates.         |
 
+~fzf-async-highlight~ controls whether matched characters are highlighted in
+the completion list.  Highlighting requires a second pass over the candidate
+list in Elisp (via ~completion-pcm--hilit-commonality~) after the C scoring
+pass.  For very large candidate sets or slower machines this can be a
+noticeable cost.  Set it to ~nil~ for plain output with no extra Elisp work:
+
+#+begin_src emacs-lisp :tangle yes
+  (setq fzf-async-highlight nil)
+#+end_src
+
 ~fzf-async-max-candidates~ caps only the number of strings consed into the
 Emacs list returned to the completion UI.  The C layer always scores and
 sorts *all* candidates: every matching string is passed through the fzf
