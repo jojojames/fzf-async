@@ -303,10 +303,10 @@ used by counsel's async commands.  The stats prompt (directory, selection
 index, filtered/total counts) is delivered via ~ivy-pre-prompt-function~,
 which ivy prepends to the prompt string on each redraw.
 
-*Highlighting caveat:* match highlighting does not work perfectly *yet* with ivy.
-Ivy bypasses ~completion-styles~ entirely and does not call the
-~all-completions~ function where ~fzf-async~ applies face properties to
-matched characters.
+*Highlighting caveat:* match highlighting does not work perfectly *yet*
+with ivy.  Ivy bypasses ~completion-styles~ entirely and does not call
+the ~all-completions~ function where ~fzf-async~ applies face properties
+to matched characters.
 
 Help appreciated.
 
@@ -338,14 +338,15 @@ scoring threads, the full scored set is counting-sorted, and then only the
 top N are handed back to Elisp.  The ~[FILTERED]~ count in the prompt
 always reflects the true number of matches, not the capped return value.
 
-This is done because anything interfacing with Emacs itself is easily the slowest
-part of the algorithm. Even converting C strings to Emacs strings can be a burden
-when the total collection size is millions of candidates. In practice, the cap
-should not be an issue (and is configurable anyways) since it's returning the top N
-candidates at any one time.
+This is done because anything interfacing with Emacs itself is easily the
+slowest part of the algorithm. Even converting C strings to Emacs strings
+can be a burden when the total collection size is millions of candidates.
+In practice, the cap should not be an issue (and is configurable anyways)
+since it's returning the top N candidates at any one time.
 
-~fzf-async-project-backend~ controls which directory file-search and grep commands
-run in.  The default ~project~ matches the behavior of ~consult~.  Available values:
+~fzf-async-project-backend~ controls which directory file-search and grep
+commands run in.  The default ~project~ matches the behavior of ~consult~.
+Available values:
 
 | Value        | Behavior                                                              |
 |--------------+-----------------------------------------------------------------------|
@@ -457,3 +458,19 @@ supported alternatives that require no native compilation.
 [[https://github.com/abo-abo/swiper/issues/848][swiper: fzf integration]]
 [[https://github.com/minad/consult/issues/587][consult: fzf integration]]
 [[https://github.com/minad/consult/discussions/1312][consult: async fzf]]
+
+* Architecture
+
+For the Elisp pipeline this package owns — async and sync
+~completing-read~ entry points, custom completion style, frontend
+abstraction, timer model, prompt overlay — see
+[[file:architecture.org][architecture.org]].
+
+The C scoring module under ~fzf-async~ is documented separately in
+[[https://github.com/dangduc/fzf-native/blob/HEAD/architecture.org][fzf-native's architecture overview]]
+(thread/lock model, ~AsyncSession~, arena allocator, counting sort,
+~score_abort~ rule).
+
+For ~fussy~, the broader fuzzy completion-style framework that
+~fzf-async~ deliberately bypasses, see
+[[https://github.com/jojojames/fussy/blob/HEAD/architecture.org][fussy's architecture overview]].

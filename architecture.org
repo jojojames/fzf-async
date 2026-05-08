@@ -1,0 +1,289 @@
+#+TITLE: fzf-async — Architecture Reference
+#+AUTHOR: James Nguyen
+#+STARTUP: overview
+#+OPTIONS: toc:3
+
+* About this file
+
+Canonical reference for *how fzf-async works today*.
+
+This file describes /implemented/ behavior only. Speculative redesigns
+and "this would be nice" notes belong in =project.org=, not here. When
+the implementation changes, update this file in the same commit.
+
+Sibling architecture docs (read together):
+
+- [[https://github.com/dangduc/fzf-native/blob/HEAD/architecture.org][fzf-native/architecture.org]]
+  — the C module under us. Read this for
+  thread/lock/arena/scoring internals.
+- [[https://github.com/jojojames/fussy/blob/HEAD/architecture.org][fussy/architecture.org]]
+  — the completion-style framework next to us. fzf-async deliberately
+  routes *around* fussy via its own completion category.
+
+* Place in the pipeline
+
+fzf-async is the Elisp-side =completing-read= experience built on top
+of =fzf-native='s sync and async surfaces. It owns the user-visible
+plumbing — completion style, frontend integration, prompt overlay,
+timers, and a set of convenience commands.
+
+#+begin_src
+  ┌──────────────────────┐    ┌──────────────────────┐
+  │ fzf-async-           │    │ fzf-sync-            │
+  │ completing-read      │    │ completing-read      │
+  │ (streaming child)    │    │ (in-memory list)     │
+  └──────────┬───────────┘    └──────────┬───────────┘
+             │                           │
+             │ fzf-native-async-*        │ fzf-native-score-all
+             ▼                           ▼
+  ╔════════════════════════════════════════════════════╗
+  ║ fzf-native (C dynamic module)                      ║
+  ║   reader thread + scoring thread + counting sort   ║
+  ╚════════════════════════════════════════════════════╝
+#+end_src
+
+The interesting performance work is in =fzf-native=. The interesting
+UX work is right here.
+
+* The two completing-read entry points
+
+| Entry point                  | Backend call                      | Use when                                          |
+|------------------------------+-----------------------------------+---------------------------------------------------|
+| =fzf-async-completing-read=  | =fzf-native-async-*= (streaming)  | Candidates come from a long-running shell command (=find=, =rg=, =git ls-files=, etc.). |
+| =fzf-sync-completing-read=   | =fzf-native-score-all= (sync batch) | Candidates are an already-realized Elisp list and you just want fzf scoring + ordering. |
+
+Both wrap =completing-read=, register the =fzf-async= completion
+category, and reuse the same passthrough completion style.
+
+* Async pipeline — =fzf-async-completing-read=
+
+#+begin_src
+  user types "fo" in minibuffer
+       │
+       ▼
+  ┌──────────────────────────────────────────────────┐
+  │ Elisp: completion table lambda                   │
+  │  - reads minibuffer query                        │
+  │  - calls (fzf-native-async-candidates h "fo")    │
+  │  - returns whatever stale snapshot is current    │
+  └──────────────────────────────────────────────────┘
+       │ non-blocking
+       ▼
+  ┌──────────────────────────────────────────────────┐
+  │ C: dispatch (see fzf-native/architecture.org)    │
+  │  - signal scoring thread (or no-op if same query)│
+  │  - copy out current score_results                │
+  └──────────────────────────────────────────────────┘
+       │
+       │     (the C side does the real work in
+       │      its own threads; we'll see results
+       │      on a future poll)
+       ▼
+  ┌──────────────────────────────────────────────────┐
+  │ Elisp: 50ms regular timer                        │
+  │  - polls fzf-native-async-generation             │
+  │  - on change → schedule idle-timer exhibit       │
+  └──────────────────────────────────────────────────┘
+       │
+       ▼
+  ┌──────────────────────────────────────────────────┐
+  │ Elisp: idle-timer exhibit                        │
+  │  - calls fzf-async--frontend-exhibit             │
+  │  - vertico/icomplete re-renders                  │
+  │  - completion table re-runs, picks up new data   │
+  └──────────────────────────────────────────────────┘
+#+end_src
+
+The C side runs three concurrent threads (reader, scorer, main); the
+Elisp side runs *zero* threads. Everything Elisp does is on the main
+thread, sequenced by the timer ticks. We get away with that because
+=fzf-native-async-candidates= is non-blocking — it returns the latest
+snapshot and dispatches the next scoring run, but never waits.
+
+For the C-side mechanics — what =score_abort= does, how the same-
+filter rule prevents livelock, how the arena handles teardown — see
+=fzf-native/architecture.org=.
+
+* Sync pipeline — =fzf-sync-completing-read=
+
+When the candidate list is already an in-memory Elisp list (e.g. SSH
+host names from =~/.ssh/config=, or buffer names), there is no value
+in spinning up a child process. =fzf-sync-completing-read= is the
+direct path:
+
+#+begin_src
+  user types "fo"
+       │
+       ▼
+  ┌──────────────────────────────────────────────────┐
+  │ Elisp: completion table lambda                   │
+  │  - reads minibuffer query                        │
+  │  - empty query? → return candidates unchanged    │
+  │  - else: (fzf-native-score-all candidates query) │
+  │  - returns scored, sorted vector                 │
+  └──────────────────────────────────────────────────┘
+       │
+       ▼
+  frontend (vertico/icomplete) renders
+#+end_src
+
+No timers, no overlay refresh, no abort plumbing. Each keystroke
+re-scores the entire list synchronously. =fzf-native-score-all= is
+parallelized internally (see =fzf-native/architecture.org=), so this
+remains snappy for tens of thousands of candidates.
+
+* Custom completion style
+
+The completion framework wants to filter, score, and re-sort the
+candidates the collection lambda returns. We don't want any of that —
+fzf has already scored, the order is already correct, and applying
+=fussy-default-regex-fn= (the typical user style) over the raw query
+mangles fzf syntax. So we register a passthrough:
+
+| Function                       | Behavior                                                |
+|--------------------------------+---------------------------------------------------------|
+| =fzf-async-try-completion=     | Returns =(cons string (length string))= — no prefix expansion |
+| =fzf-async-all-completions=    | Calls collection lambda with the *raw* query, returns =(nconc cands 0)= |
+| =fzf-async-setup= (autoload)   | Registers the style and pins it for the =fzf-async= and =fzf-async-file= categories via =completion-category-overrides= |
+
+The collection lambda's metadata returns =(category . fzf-async)= (or
+=fzf-async-file=) plus =(display-sort-function . identity)= and
+=(cycle-sort-function . identity)= so vertico/icomplete don't re-sort.
+
+The category was deliberately named =fzf-async= (not =fzf=) to avoid
+colliding with any user config that already maps =fzf= to fussy.
+
+The =fzf-async-file= category exists so =marginalia-annotate-file= can
+attach to file commands (=fzf-async-find=, =fzf-async-fd=, etc.)
+without the marginalia → file-category override pulling them back
+into fussy's filtering. See History → "Marginalia interaction is
+broken" in =project.org= for the full diagnosis.
+
+* Frontend abstraction
+
+Two helpers route around vertico/icomplete/ivy differences:
+
+| Function                       | Purpose                                                   |
+|--------------------------------+-----------------------------------------------------------|
+| =fzf-async--frontend-index=    | Current selection index for the active frontend, or =nil= |
+| =fzf-async--frontend-exhibit=  | Trigger the frontend to re-read the completion table     |
+
+ivy uses a *push* model rather than pull, so it has its own dedicated
+path: a closure pushes via =ivy--set-candidates= then redraws via
+=ivy--exhibit=. ivy bypasses =completion-styles= entirely —
+highlighting does not work under ivy as a known limitation.
+
+* Timer model (async path only)
+
+Two timers, two purposes:
+
+| Timer                                         | Period | Purpose                                                     |
+|-----------------------------------------------+--------+-------------------------------------------------------------|
+| =fzf-async-refresh-delay= (regular timer)     | 0.05s  | Polls =fzf-native-async-generation=. On change, *schedules an idle timer* (=run-with-idle-timer 0 nil=) to call =fzf-async--frontend-exhibit=. Throttled by =fzf-async-input-throttle=. |
+| =fzf-async-input-debounce= (idle timer)       | 0.1s   | Self-healing: if a previous tick's exhibit was interrupted by =while-no-input=, this re-tries it after the user pauses typing.    |
+
+The double-indirection — regular timer detects, idle timer exhibits —
+is deliberate. Regular timer ticks count as pending input from the
+=while-no-input= perspective; calling =vertico--exhibit= directly from
+a regular timer trips that check and aborts every scoring run. Idle
+timers fire between events.
+
+=fzf-async-input-throttle= (default 0.2s) caps how often the regular
+timer will actually schedule an exhibit. Streaming new candidates at
+60 Hz otherwise floods the UI.
+
+* Prompt overlay
+
+Format: =dir » idx/[sent](total) =
+
+| Field   | Source                                                      |
+|---------+-------------------------------------------------------------|
+| =dir=   | =(abbreviate-file-name default-directory)=                  |
+| =idx=   | =fzf-async--frontend-index= (1-based; omitted on icomplete) |
+| =sent=  | =min(filtered, fzf-async-max-candidates)=                   |
+| =total= | =cdr= of =fzf-native-async-stats= (full pool size)          |
+
+Updated via =post-command-hook= so =idx= tracks live during
+navigation. =fzf-async-max-candidates= (default 10 000) caps =sent= so
+the cost of building the Emacs list stays bounded; =filtered= and
+=total= always report ground truth so the user is never misled.
+
+* Frontend count format suppression
+
+Bound via =minibuffer-with-setup-hook= + =setq-local= (not =let=,
+which doesn't reach the minibuffer buffer):
+
+| Frontend  | Variable                   | Set to |
+|-----------+----------------------------+--------|
+| vertico   | =vertico-count-format=     | =nil=  |
+| icomplete | =icomplete-matches-format= | =nil=  |
+| ivy       | =ivy-count-format=         | =""=   |
+
+This stops each frontend's built-in =1/2000= counter from doubling up
+with our overlay.
+
+* Empty-query and timer-triggered empty-string handling
+
+The completion table receives =str=""= in two distinct situations:
+genuine empty query (user has cleared the minibuffer) and timer
+re-exhibit when no minibuffer window is active. The lambda
+distinguishes:
+
+#+begin_src elisp
+  (if (not (string-empty-p str))
+      str                        ; genuine query
+    (when-let* ((win (active-minibuffer-window)))
+      (with-current-buffer (window-buffer win)
+        (minibuffer-contents))))  ; refresh — read live minibuffer
+#+end_src
+
+If neither path produces a query, return the cached =last-result=
+unchanged. This prevents an empty-query call from poisoning the cache
+mid-typing.
+
+* Behavior reference (canonical input → output, Elisp side)
+
+** Empty query (async path)
+
+| Input                                          | Output                                                     |
+|------------------------------------------------+------------------------------------------------------------|
+| Active minibuffer, =str=""=                    | Unfiltered =score_results= snapshot from the C module, capped at =fzf-async-max-candidates=. |
+| No active minibuffer, =str=""=                 | Cached =last-result= unchanged (timer re-exhibit case).    |
+
+** Empty query (sync path)
+
+| Input                              | Output                                                |
+|------------------------------------+-------------------------------------------------------|
+| =candidates=, =str=""=             | =candidates= returned unchanged (the lambda's identity branch). |
+
+** Generation change
+
+| Event                                      | Effect                                                  |
+|--------------------------------------------+---------------------------------------------------------|
+| C-side =gen= bumps                         | 50 ms regular timer detects → schedules idle-timer exhibit (subject to =fzf-async-input-throttle=). |
+| Idle-timer exhibit fires                   | =fzf-async--frontend-exhibit= calls into the active frontend; the completion table re-runs and picks up new data. |
+
+** Quit (=C-g= / ESC)
+
+| Event                                      | Effect                                                |
+|--------------------------------------------+-------------------------------------------------------|
+| User aborts =completing-read=              | =unwind-protect= runs: cancel timers, remove overlay, =fzf-native-async-stop= the handle (which tears down threads + arena — see fzf-native/architecture.org). |
+
+* Concurrency model — quick reference (Elisp side)
+
+| Invariant                                                 | Why it holds                          |
+|-----------------------------------------------------------+---------------------------------------|
+| Idle-timer exhibits don't trip =while-no-input= inside =fzf-native-async-candidates=. | Idle timers don't count as pending input; regular timers do, which is why exhibits are *scheduled* by a regular timer but *fired* by an idle one. |
+| The Elisp side never blocks on the C scoring thread.      | =fzf-native-async-candidates= is non-blocking by contract — it returns the current snapshot immediately, regardless of scoring state. |
+| Marginalia annotators don't pull candidates into a different completion style. | =fzf-async-file= category routes file annotations through marginalia *and* keeps the completion style as =fzf-async=. |
+
+* References
+
+- =fzf-async.el= — this package's full Elisp surface (~1000 lines).
+- =project.org= (gitignored) — chronological history, open bugs,
+  decisions, transcripts of how we got here.
+- [[https://github.com/dangduc/fzf-native/blob/HEAD/architecture.org][fzf-native/architecture.org]]
+  — the C internals this document defers to.
+- [[https://github.com/jojojames/fussy/blob/HEAD/architecture.org][fussy/architecture.org]]
+  — the completion-style framework that fzf-async deliberately
+  bypasses.
