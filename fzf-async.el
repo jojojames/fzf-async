@@ -266,9 +266,9 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
               (with-selected-window (active-minibuffer-window)
                 (let ((idx (fzf-async--frontend-index)))
                   (fzf-async--log "DEBUG: %s%s %s[%d](%d) "
-                                 prompt dir
-                                 (if idx (format "%d/" (1+ idx)) "")
-                                 last-filtered last-total)
+                                  prompt dir
+                                  (if idx (format "%d/" (1+ idx)) "")
+                                  last-filtered last-total)
                   (overlay-put stats-overlay 'display
                                (if idx
                                    (format "%s%s %d/[%d](%d) "
@@ -428,6 +428,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
           ,@(when affix    `((affixation-function  . ,affix)))
           ,@(when group    `((group-function       . ,group)))))
        (`(boundaries . ,_) (cons 0 0))
+       ('lambda t)
        ('t (let ((query (if (not (string-empty-p str))
                             str
                           (when-let* ((win (active-minibuffer-window)))
@@ -702,39 +703,34 @@ Searches /Applications for *.app bundles and opens the selection with `open'."
 
 ;;;###autoload
 (defun fzf-async-swiper ()
-  "Search the current buffer using fzf.
-Captures buffer content (including unsaved changes) to a temp file
-and searches it with grep.  Selects a line and jumps to it."
+  "Search lines of the current buffer using fzf."
   (interactive)
   (let* ((buffer (current-buffer))
-         (tmpfile (make-temp-file "fzf-async-swiper-"))
-         (grep (or (executable-find "grep")
-                   (user-error "grep not found in exec-path"))))
-    (unwind-protect
-        (progn
-          (with-temp-file tmpfile
-            (insert-buffer-substring buffer))
-          (when-let* ((r (fzf-async-completing-read
-                          :prompt "swiper: "
-                          :command (format "%s -n '.' %s"
-                                          (shell-quote-argument grep)
-                                          (shell-quote-argument tmpfile))
-                          :directory (fzf-async--project-dir)))
-                      (match (string-match "^\\([0-9]+\\):" r))
-                      (line (string-to-number (match-string 1 r))))
-            (switch-to-buffer buffer)
-            (goto-char (point-min))
-            (forward-line (1- line))))
-      (delete-file tmpfile))))
+         (candidates
+          (with-current-buffer buffer
+            (let (lines)
+              (save-excursion
+                (goto-char (point-min))
+                (let ((i 1))
+                  (while (not (eobp))
+                    (let ((content (buffer-substring-no-properties
+                                    (line-beginning-position)
+                                    (line-end-position))))
+                      (unless (string-empty-p content)
+                        (push (format "%d:%s" i content) lines)))
+                    (forward-line 1)
+                    (cl-incf i))))
+              (nreverse lines)))))
+    (when-let* ((r (fzf-sync-completing-read :candidates candidates :prompt "swiper: "))
+                (match (string-match "^\\([0-9]+\\):" r))
+                (line (string-to-number (match-string 1 r))))
+      (switch-to-buffer buffer)
+      (goto-char (point-min))
+      (forward-line (1- line)))))
 
 ;;;###autoload
 (defun fzf-async-swiper-all ()
-  "Search all open buffers using fzf.
-Each buffer's content is written to a temp file indexed by position
-in the buffer list; grep searches all files recursively.  Selects a
-matching line and jumps to it in the originating buffer.
-
-This is just a POC, will probably polish it later.."
+  "Search lines across all open buffers using fzf."
   (interactive)
   (let* ((buffers (cl-remove-if
                    (lambda (b)
@@ -742,39 +738,38 @@ This is just a POC, will probably polish it later.."
                          (string-prefix-p " " (buffer-name b))))
                    (buffer-list)))
          (buf-vec (vconcat buffers))
-         (tmpdir (make-temp-file "fzf-async-swiper-all-" t))
-         (grep (or (executable-find "grep")
-                   (user-error "grep not found in exec-path"))))
-    (unwind-protect
-        (progn
+         (candidates
           (cl-loop for buf across buf-vec
                    for i from 0
-                   do (with-temp-file
-                          (expand-file-name
-                           (format "%d-%s" i (fzf-async--sanitize-filename
-                                              (buffer-name buf)))
-                           tmpdir)
-                        (insert-buffer-substring buf)))
-          (when-let* ((r (fzf-async-completing-read
-                          :prompt "swiper-all: "
-                          :command (format "%s -rn '.' %s"
-                                          (shell-quote-argument grep)
-                                          (shell-quote-argument tmpdir))
-                          :directory (fzf-async--project-dir)))
-                      (pfx (file-name-as-directory tmpdir))
-                      ((string-prefix-p pfx r))
-                      (rel (substring r (length pfx)))
-                      ;; rel is "INDEX-bufname:LINE:content"; bufname has no ":"
-                      (match (string-match "^\\([0-9]+\\)-[^:]*:\\([0-9]+\\):" rel))
-                      (idx (string-to-number (match-string 1 rel)))
-                      (line (string-to-number (match-string 2 rel)))
-                      ((< idx (length buf-vec)))
-                      (buffer (aref buf-vec idx))
-                      ((buffer-live-p buffer)))
-            (switch-to-buffer buffer)
-            (goto-char (point-min))
-            (forward-line (1- line))))
-      (delete-directory tmpdir t))))
+                   for pfx = (format "%d-%s" i (fzf-async--sanitize-filename
+                                                (buffer-name buf)))
+                   append (with-current-buffer buf
+                            (let (lines)
+                              (save-excursion
+                                (goto-char (point-min))
+                                (let ((j 1))
+                                  (while (not (eobp))
+                                    (let ((content
+                                           (buffer-substring-no-properties
+                                            (line-beginning-position)
+                                            (line-end-position))))
+                                      (unless (string-empty-p content)
+                                        (push (format "%s:%d:%s" pfx j content)
+                                              lines)))
+                                    (forward-line 1)
+                                    (cl-incf j))))
+                              (nreverse lines))))))
+    (when-let* ((r (fzf-sync-completing-read
+                    :candidates candidates :prompt "swiper-all: "))
+                (match (string-match "^\\([0-9]+\\)-[^:]*:\\([0-9]+\\):" r))
+                (idx (string-to-number (match-string 1 r)))
+                (line (string-to-number (match-string 2 r)))
+                ((< idx (length buf-vec)))
+                (buffer (aref buf-vec idx))
+                ((buffer-live-p buffer)))
+      (switch-to-buffer buffer)
+      (goto-char (point-min))
+      (forward-line (1- line)))))
 
 ;;; Helpers
 
@@ -845,9 +840,7 @@ so fzf receives an initial empty-query argument."
     fzf-async-hg-files
     fzf-async-locate
     fzf-async-spotlight
-    fzf-async-spotlight-apps
-    fzf-async-swiper
-    fzf-async-swiper-all)
+    fzf-async-spotlight-apps)
   "All fzf-async commands that use `fzf-async-completing-read'.")
 
 (defcustom fzf-async-file-commands
