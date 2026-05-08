@@ -236,7 +236,8 @@ via the `ivy-push' closure in `fzf-async-completing-read': calling
 (cl-defun fzf-async-completing-read (&key
                                      (prompt "fzf > ")
                                      command
-                                     (directory default-directory))
+                                     (directory default-directory)
+                                     group)
   "Run shell COMMAND and completing-read its output.
 
 :PROMPT     Minibuffer prompt string.  Defaults to \"fzf > \".
@@ -337,9 +338,10 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
              prompt
              (lambda (str _pred action)
              (pcase action
-               ('metadata '(metadata (category . fzf-async)
+               ('metadata `(metadata (category . fzf-async)
                                      (display-sort-function . identity)
-                                     (cycle-sort-function . identity)))
+                                     (cycle-sort-function . identity)
+                                     ,@(when group `((group-function . ,group)))))
                ;; Treat the whole input as one field; prevents space-splitting.
                (`(boundaries . ,_) (cons 0 0))
                ('t (let* (;; Str is sometimes empty when there's a valid query.
@@ -492,7 +494,8 @@ Selecting a candidate opens the file at that line."
                   :prompt "rg: "
                   :command (fzf-async--normalize
                             "rg  --line-number --no-heading --with-filename ''")
-                  :directory (fzf-async--project-dir)))
+                  :directory (fzf-async--project-dir)
+                  :group #'fzf-async--grep-group))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
               (line (string-to-number (match-string 2 r))))
@@ -511,7 +514,8 @@ Selecting a candidate opens the file at that line."
                   :prompt "ag: "
                   :command (fzf-async--normalize
                             "ag --nocolor --nogroup --line-number \".\"")
-                  :directory (fzf-async--project-dir)))
+                  :directory (fzf-async--project-dir)
+                  :group #'fzf-async--grep-group))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
               (line (string-to-number (match-string 2 r))))
@@ -531,7 +535,8 @@ Selecting a candidate opens the file at that line."
   (when-let* ((r (fzf-async-completing-read
                   :prompt "git grep: "
                   :command (fzf-async--normalize "git --no-pager grep -n \"\"")
-                  :directory (fzf-async--project-dir)))
+                  :directory (fzf-async--project-dir)
+                  :group #'fzf-async--grep-group))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
               (line (string-to-number (match-string 2 r))))
@@ -549,7 +554,8 @@ Selecting a candidate opens the file at that line."
   (when-let* ((r (fzf-async-completing-read
                   :prompt "grep: "
                   :command (fzf-async--normalize "grep -Rn ''")
-                  :directory (fzf-async--project-dir)))
+                  :directory (fzf-async--project-dir)
+                  :group #'fzf-async--grep-group))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
               (line (string-to-number (match-string 2 r))))
@@ -587,7 +593,8 @@ Selecting a candidate opens the file at that line."
   (when-let* ((r (fzf-async-completing-read
                   :prompt "ugrep: "
                   :command (fzf-async--normalize "ugrep -RIn --no-heading ''")
-                  :directory (fzf-async--project-dir)))
+                  :directory (fzf-async--project-dir)
+                  :group #'fzf-async--grep-group))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
               (line (string-to-number (match-string 2 r))))
@@ -760,7 +767,19 @@ Searches /Applications for *.app bundles and opens the selection with `open'."
                                     (cl-incf j))))
                               (nreverse lines))))))
     (when-let* ((r (fzf-sync-completing-read
-                    :candidates candidates :prompt "swiper-all: "))
+                    :candidates candidates
+                    :prompt "swiper-all: "
+                    :group (lambda (cand transform)
+                             ;; Candidates: "IDX-BUFNAME:LINE:CONTENT"
+                             (if transform
+                                 ;; Display: strip "IDX-BUFNAME:" prefix
+                                 (when (string-match "^[^:]+:\\(.*\\)$" cand)
+                                   (match-string 1 cand))
+                               ;; Group header: actual buffer name from index
+                               (when (string-match "^\\([0-9]+\\)-" cand)
+                                 (let ((i (string-to-number (match-string 1 cand))))
+                                   (when (< i (length buf-vec))
+                                     (buffer-name (aref buf-vec i)))))))))
                 (match (string-match "^\\([0-9]+\\)-[^:]*:\\([0-9]+\\):" r))
                 (idx (string-to-number (match-string 1 r)))
                 (line (string-to-number (match-string 2 r)))
@@ -801,7 +820,8 @@ Selecting a match opens the file and jumps to the line."
       (when-let* ((r (fzf-async-completing-read
                       :prompt "hungry swiper: "
                       :command command
-                      :directory default-directory))
+                      :directory default-directory
+                      :group #'fzf-async--grep-group))
                   (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
                   (file (match-string 1 r))
                   (line (string-to-number (match-string 2 r))))
@@ -843,6 +863,15 @@ by a shallower parent, then streams fd (or find) output through fzf."
         (find-file result)))))
 
 ;;; Helpers
+
+(defun fzf-async--grep-group (cand transform)
+  "Group function for FILE:LINE:CONTENT grep candidates.
+TRANSFORM nil  → return the filename as the section header.
+TRANSFORM non-nil → strip the filename prefix; display LINE:CONTENT only."
+  (let ((i (string-search ":" cand)))
+    (if transform
+        (if i (substring cand (1+ i)) cand)
+      (if i (substring cand 0 i) cand))))
 
 (defun fzf-async--project-dir ()
   "Return the root directory for fzf-async commands.
