@@ -391,21 +391,42 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
 (cl-defun fzf-sync-completing-read (&key
                                     candidates
                                     (prompt "fzf > ")
-                                    (category 'fzf-async))
+                                    (category 'fzf-async)
+                                    annotate
+                                    affix
+                                    group)
   "Run completing-read over CANDIDATES using fzf-native for scoring.
 
 :CANDIDATES List of strings to score with `fzf-native-score-all'.
 :PROMPT     Minibuffer prompt string.  Defaults to \"fzf > \".
 :CATEGORY   Completion category symbol.  Defaults to `fzf-async'.
             Use `fzf-async-file' for file-path candidates so marginalia
-            can annotate them with file metadata."
+            can annotate them with file metadata.
+:ANNOTATE   Optional function (CANDIDATE) -> string appended after each
+            candidate.  Exposed as `annotation-function' in completion
+            metadata.  Annotations start immediately after the candidate
+            string, so column alignment depends on candidate widths.
+:AFFIX      Optional function (CANDIDATES) -> list of (CANDIDATE PREFIX
+            SUFFIX).  Exposed as `affixation-function'.  Vertico
+            right-pads each candidate to a consistent width before
+            appending SUFFIX, giving true column alignment.  Prefer this
+            over :ANNOTATE when alignment matters.
+:GROUP      Optional function (CANDIDATE TRANSFORM) -> string.  When
+            TRANSFORM is nil return the group name; when non-nil return
+            the display string for CANDIDATE within its group.  Frontends
+            like vertico render group headers between sections."
   (completing-read
    prompt
    (lambda (str _pred action)
      (pcase action
-       ('metadata `(metadata (category . ,category)
-                             (display-sort-function . identity)
-                             (cycle-sort-function . identity)))
+       ('metadata
+        `(metadata
+          (category . ,category)
+          (display-sort-function . identity)
+          (cycle-sort-function . identity)
+          ,@(when annotate `((annotation-function  . ,annotate)))
+          ,@(when affix    `((affixation-function  . ,affix)))
+          ,@(when group    `((group-function       . ,group)))))
        (`(boundaries . ,_) (cons 0 0))
        ('t (let ((query (if (not (string-empty-p str))
                             str
