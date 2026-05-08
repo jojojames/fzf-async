@@ -199,6 +199,21 @@ the matching line.
 | ~fzf-async-ugrep~             | —                  | —                    |
 | ~fzf-async-swiper~            | ~swiper~           | ~consult-line~       |
 | ~fzf-async-swiper-all~        | ~swiper-all~       | ~consult-line-multi~ |
+| ~fzf-async-swiper-hungry~     | —                  | —                    |
+| ~fzf-async-find-hungry~       | —                  | —                    |
+
+** Hungry variants
+
+The hungry commands derive their search scope from the currently open buffers.
+They collect ~buffer-file-name~ for every file-visiting buffer, extract the
+parent directory of each, then deduplicate: if directory ~A~ is a prefix of ~B~,
+~B~ is dropped since ~A~'s recursive search already covers it.  The resulting
+directory list is passed as arguments to a single shell command.
+
+| Command                   | Tool       | What it searches                       |
+|---------------------------+------------+----------------------------------------|
+| ~fzf-async-find-hungry~   | fd / find  | Files under all derived directories    |
+| ~fzf-async-swiper-hungry~ | rg / grep  | Line content under all derived dirs    |
 
 * Completion style compatibility
 
