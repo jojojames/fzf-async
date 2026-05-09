@@ -42,6 +42,8 @@
 (defvar marginalia-annotate-file)
 (defvar marginalia-annotator-registry)
 (defvar marginalia-command-categories)
+(declare-function bookmark-all-names "bookmark")
+(declare-function bookmark-maybe-load-default-file "bookmark")
 (declare-function icomplete-exhibit "icomplete")
 (defvar ivy-text)
 (defvar ivy--index)
@@ -717,8 +719,7 @@ Searches /Applications for *.app bundles and opens the selection with `open'."
   (interactive)
   (when-let* ((result (fzf-async-completing-read
                        :prompt "spotlight: "
-                       :command (format "%s 'kMDItemFSName == \"*.app\"'"
-                                        (executable-find "mdfind")))))
+                       :command "mdfind 'kMDItemFSName == \"*.app\"'")))
     (start-process "default-app" nil "open" result)))
 
 ;;;###autoload
@@ -896,7 +897,9 @@ TRANSFORM non-nil → strip the filename prefix; display LINE:CONTENT only."
 
 (defun fzf-async--default-dir ()
   "Return the working directory for fzf-async commands.
-Priority: `fzf-async-directory' > `fzf-async-project-backend' > `default-directory'."
+Priority: `fzf-async-directory' >
+          `fzf-async-project-backend' >
+          `default-directory'."
   (or fzf-async-directory
       (pcase fzf-async-project-backend
         ((pred functionp)
