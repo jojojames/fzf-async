@@ -257,7 +257,7 @@ Returns the selected candidate string, or nil on cancel."
 (cl-defun fzf-async-completing-read (&key
                                      prompt
                                      command
-                                     (directory default-directory)
+                                     (directory (fzf-async--default-dir))
                                      group
                                      skip-executable-check)
   "Run shell COMMAND and completing-read its output.
@@ -266,7 +266,8 @@ Returns the selected candidate string, or nil on cancel."
                         COMMAND (e.g. \"find: \" for \"find .\") when omitted.
 :COMMAND                Shell command whose stdout lines become candidates.
 :DIRECTORY              Working directory for COMMAND.  Defaults to
-                        `default-directory'.
+                        `fzf-async--default-dir' (respects
+                        `fzf-async-project-backend').
 :SKIP-EXECUTABLE-CHECK  When non-nil, skip the `executable-find' guard on
                         the first token of COMMAND.
 
@@ -486,8 +487,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
   "Find a file under `default-directory' using find."
   (interactive)
   (when-let* ((result (fzf-async-completing-read
-                       :command "find ."
-                       :directory (fzf-async--project-dir))))
+                       :command "find .")))
     (find-file result)))
 
 ;;;###autoload
@@ -495,8 +495,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
   "Find a file under `default-directory' using fd."
   (interactive)
   (when-let* ((result (fzf-async-completing-read
-                       :command "fd --no-ignore"
-                       :directory (fzf-async--project-dir))))
+                       :command "fd --no-ignore")))
     (find-file result)))
 
 ;;;###autoload
@@ -504,8 +503,8 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
   "Find a file under `default-directory' using rg --files."
   (interactive)
   (when-let* ((result (fzf-async-completing-read
-                       :command "rg --files"
-                       :directory (fzf-async--project-dir))))
+                       :prompt "rg files: "
+                       :command "rg --files")))
     (find-file result)))
 
 ;;;###autoload
@@ -513,8 +512,8 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
   "Find a file under `default-directory' using ag."
   (interactive)
   (when-let* ((result (fzf-async-completing-read
-                       :command "ag -g ."
-                       :directory (fzf-async--project-dir))))
+                       :prompt "ag files: "
+                       :command "ag -g .")))
     (find-file result)))
 
 ;;;###autoload
@@ -526,7 +525,6 @@ Selecting a candidate opens the file at that line."
   (interactive)
   (when-let* ((r (fzf-async-completing-read
                   :command "rg --line-number --no-heading --with-filename ''"
-                  :directory (fzf-async--project-dir)
                   :group #'fzf-async--grep-group))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
@@ -544,7 +542,6 @@ Selecting a candidate opens the file at that line."
   (interactive)
   (when-let* ((r (fzf-async-completing-read
                   :command "ag --nocolor --nogroup --line-number \".\""
-                  :directory (fzf-async--project-dir)
                   :group #'fzf-async--grep-group))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
@@ -564,7 +561,6 @@ Selecting a candidate opens the file at that line."
     (error "Not a Git repo"))
   (when-let* ((r (fzf-async-completing-read
                   :command "git --no-pager grep -n \"\""
-                  :directory (fzf-async--project-dir)
                   :group #'fzf-async--grep-group))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
@@ -582,7 +578,6 @@ Selecting a candidate opens the file at that line."
   (interactive)
   (when-let* ((r (fzf-async-completing-read
                   :command "grep -Rn ''"
-                  :directory (fzf-async--project-dir)
                   :group #'fzf-async--grep-group))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
@@ -600,8 +595,7 @@ Selecting a candidate jumps to that line in the file."
   (when-let* ((bf buffer-file-name) ;; Track buffer.
               (r (fzf-async-completing-read
                   :command (format "grep -vn '^[[:space:]]*$' %s"
-                                   (shell-quote-argument buffer-file-name))
-                  :directory (fzf-async--project-dir)))
+                                   (shell-quote-argument buffer-file-name))))
               (match (string-match "^\\([0-9]+\\):\\(.*\\)$" r))
               (line (string-to-number (match-string 1 r))))
     (find-file bf) ;; In case they swapped windows.
@@ -618,7 +612,6 @@ Selecting a candidate opens the file at that line."
   (interactive)
   (when-let* ((r (fzf-async-completing-read
                   :command "ugrep -RIn --no-heading ''"
-                  :directory (fzf-async--project-dir)
                   :group #'fzf-async--grep-group))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
@@ -635,8 +628,7 @@ Selecting a candidate opens the file at that line."
     (error "Not a Git repo"))
   (when-let* ((result (fzf-async-completing-read
                        :prompt "git ls files: "
-                       :command "git ls-files"
-                       :directory (fzf-async--project-dir))))
+                       :command "git ls-files")))
     (find-file result)))
 
 ;;;###autoload
@@ -647,8 +639,7 @@ Selecting a candidate opens the file at that line."
     (error "Not a Mercurial repo"))
   (when-let* ((result (fzf-async-completing-read
                        :prompt "hg files: "
-                       :command "hg files"
-                       :directory (fzf-async--project-dir))))
+                       :command "hg files")))
     (find-file result)))
 
 ;;;###autoload
@@ -694,8 +685,7 @@ Selecting a candidate opens the file at that line."
   "Find a file system-wide using locate."
   (interactive)
   (when-let* ((result (fzf-async-completing-read
-                       :command "locate ''"
-                       :directory (fzf-async--project-dir))))
+                       :command "locate ''")))
     (find-file result)))
 
 ;;;###autoload
@@ -705,9 +695,7 @@ Selecting a candidate opens the file at that line."
   (interactive)
   (when-let* ((result (fzf-async-completing-read
                        :prompt "spotlight: "
-                       :command "mdfind ."
-                       ;; :command "mdfind . 2>/dev/null"
-                       :directory (fzf-async--project-dir))))
+                       :command "mdfind .")))
     (if (string-suffix-p ".app" result)
         (start-process "default-app" nil "open" result)
       (find-file result))))
@@ -720,8 +708,7 @@ Searches /Applications for *.app bundles and opens the selection with `open'."
   (when-let* ((result (fzf-async-completing-read
                        :prompt "spotlight: "
                        :command (format "%s 'kMDItemFSName == \"*.app\"'"
-                                        (executable-find "mdfind"))
-                       :directory (fzf-async--project-dir))))
+                                        (executable-find "mdfind")))))
     (start-process "default-app" nil "open" result)))
 
 ;;;###autoload
@@ -897,7 +884,7 @@ TRANSFORM non-nil → strip the filename prefix; display LINE:CONTENT only."
         (if i (substring cand (1+ i)) cand)
       (if i (substring cand 0 i) cand))))
 
-(defun fzf-async--project-dir ()
+(defun fzf-async--default-dir ()
   "Return the root directory for fzf-async commands.
 Respects `fzf-async-project-backend'; falls back to `default-directory'."
   (or (pcase fzf-async-project-backend
@@ -983,7 +970,7 @@ Like `fzf-async-shell-command' but runs in the project root."
   (interactive
    (list (read-shell-command "Shell command: "
                              nil 'fzf-async-shell-command-history)))
-  (fzf-async-shell-command command (fzf-async--project-dir)))
+  (fzf-async-shell-command command (fzf-async--default-dir)))
 
 ;;; Setup
 

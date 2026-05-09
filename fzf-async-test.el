@@ -54,13 +54,13 @@
 (ert-deftest fzf-async-sanitize-filename-plain-name-unchanged ()
   (should (string= (fzf-async--sanitize-filename "plain-name") "plain-name")))
 
-;;; fzf-async--project-dir
+;;; fzf-async--default-dir
 
 (ert-deftest fzf-async-project-dir-nil-backend-returns-default-directory ()
   "With nil backend, returns `default-directory'."
   (let ((fzf-async-project-backend nil)
         (default-directory "/some/dir/"))
-    (should (string= (fzf-async--project-dir) "/some/dir/"))))
+    (should (string= (fzf-async--default-dir) "/some/dir/"))))
 
 (ert-deftest fzf-async-project-dir-project-backend-uses-project-root ()
   "With `project' backend, returns the project root when in a project."
@@ -69,19 +69,19 @@
                (lambda (&rest _) '(vc Git "/mock/project/")))
               ((symbol-function 'project-root)
                (lambda (_) "/mock/project/")))
-      (should (string= (fzf-async--project-dir) "/mock/project/")))))
+      (should (string= (fzf-async--default-dir) "/mock/project/")))))
 
 (ert-deftest fzf-async-project-dir-project-backend-fallback ()
   "With `project' backend, falls back to `default-directory' outside a project."
   (let ((fzf-async-project-backend 'project)
         (default-directory "/fallback/"))
     (cl-letf (((symbol-function 'project-current) (lambda (&rest _) nil)))
-      (should (string= (fzf-async--project-dir) "/fallback/")))))
+      (should (string= (fzf-async--default-dir) "/fallback/")))))
 
 (ert-deftest fzf-async-project-dir-custom-function ()
   "A function value is called and its return value used."
   (let ((fzf-async-project-backend (lambda () "/custom/root/")))
-    (should (string= (fzf-async--project-dir) "/custom/root/"))))
+    (should (string= (fzf-async--default-dir) "/custom/root/"))))
 
 ;;; fzf-async-swiper line collection
 
