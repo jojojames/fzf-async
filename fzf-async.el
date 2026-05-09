@@ -112,6 +112,21 @@ run of matched bytes via fzf_get_positions."
                  (integer :tag "Top N candidates"))
   :group 'fzf-async)
 
+(defcustom fzf-async-max-line-length t
+  "Maximum character length of a candidate line.
+nil              — no limit (current behavior).
+t                — apply a built-in default of 512 characters.
+a positive N     — exclude lines longer than N characters.
+a negative -N    — include but truncate lines to N characters.
+
+Applies at read time: lines from the subprocess are filtered or
+truncated before entering the candidate pool, so scoring never
+sees the excess characters."
+  :type '(choice (const   :tag "No limit" nil)
+                 (const   :tag "Default (512)" t)
+                 (integer :tag "N (positive = exclude, negative = truncate)"))
+  :group 'fzf-async)
+
 (defcustom fzf-async-project-backend 'project
   "How to resolve the root directory for fzf-async commands.
 project    Use `project.el' to find the project root (default, matches consult).
