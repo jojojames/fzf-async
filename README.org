@@ -97,7 +97,7 @@ Main Repo:
 
 #+begin_src emacs-lisp :tangle yes
   (use-package fzf-native
-    :vc (:url "https://github.com/dangduc/fzf-native")
+    :vc (:url "https://github.com/dangduc/fzf-native" :rev :newest)
     :config
     (fzf-native-load-dyn))
 #+end_src
@@ -106,7 +106,7 @@ Fork: (Might have to use this for now.)
 
 #+begin_src emacs-lisp :tangle yes
   (use-package fzf-native
-    :vc (:url "https://github.com/jojojames/fzf-native")
+    :vc (:url "https://github.com/jojojames/fzf-native" :rev :newest)
     :config
     (fzf-native-load-dyn))
 #+end_src
@@ -115,7 +115,7 @@ Minimal setup:
 
 #+begin_src emacs-lisp :tangle yes
   (use-package fzf-async
-    :vc (:url "https://github.com/jojojames/fzf-async")
+    :vc (:url "https://github.com/jojojames/fzf-async" :rev :newest)
     :config
     (fzf-async-setup))
 #+end_src
@@ -124,20 +124,20 @@ Recommended:
 
 #+begin_src emacs-lisp :tangle yes
   (use-package fzf-native
-    :vc (:url "https://github.com/dangduc/fzf-native")
-    ;; OR :vc (:url "https://github.com/jojojames/fzf-native")
+    :vc (:url "https://github.com/dangduc/fzf-native" :rev :newest)
+    ;; OR :vc (:url "https://github.com/jojojames/fzf-native" :rev :newest)
     :config
     (fzf-native-load-dyn))
 
   (use-package fussy
-    :vc (:url "https://github.com/jojojames/fussy")
+    :vc (:url "https://github.com/jojojames/fussy" :rev :newest)
     :config
     (fussy-setup-fzf)
     (fussy-eglot-setup)
     (fussy-company-setup))
 
   (use-package fzf-async
-    :vc (:url "https://github.com/jojojames/fzf-async")
+    :vc (:url "https://github.com/jojojames/fzf-async" :rev :newest)
     :config
     (fzf-async-setup))
 #+end_src
@@ -251,13 +251,13 @@ command (e.g. ~find~ or ~ripgrep~) and must be streamed incrementally.
 
 #+begin_src emacs-lisp :tangle yes
   (use-package fzf-native
-    :vc (:url "https://github.com/dangduc/fzf-native")
+    :vc (:url "https://github.com/dangduc/fzf-native" :rev :newest)
     :config
     (fzf-native-load-dyn))
 
   ;; Synchronous fuzzy completion for code, buffers, M-x, etc.
   (use-package fussy
-    :vc (:url "https://github.com/jojojames/fussy")
+    :vc (:url "https://github.com/jojojames/fussy" :rev :newest)
     :config
     (fussy-setup-fzf)
     (fussy-eglot-setup)
@@ -265,7 +265,7 @@ command (e.g. ~find~ or ~ripgrep~) and must be streamed incrementally.
 
   ;; Async fuzzy completion for large file/grep searches.
   (use-package fzf-async
-    :vc (:url "https://github.com/jojojames/fzf-async")
+    :vc (:url "https://github.com/jojojames/fzf-async" :rev :newest)
     :config
     (fzf-async-setup))
 #+end_src
