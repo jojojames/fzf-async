@@ -127,6 +127,15 @@ sees the excess characters."
                  (integer :tag "N (positive = exclude, negative = truncate)"))
   :group 'fzf-async)
 
+(defcustom fzf-async-cache-size 20
+  "Maximum number of scored snapshots cached per async session.
+Each cache entry stores the top-K results and the full matched-candidate
+index for one (query, pool-generation) pair, enabling exact-fresh hits
+and prefix-refinement without re-scoring the full pool.
+Takes effect at session start; changing it does not affect running sessions."
+  :type 'integer
+  :group 'fzf-async)
+
 (defcustom fzf-async-project-backend 'project
   "How to resolve the root directory for fzf-async commands.
 project    Use `project.el' to find the project root (default, matches consult).
@@ -150,8 +159,7 @@ Always accepts STRING as-is; scoring is done in C."
 (defun fzf-async-all-completions (string table pred _point)
   "All-completions for the fzf-async completion style.
 Passes STRING through to the collection TABLE without transformation.
-Highlighting is applied by the C layer (see `fzf-async-highlight' and
-`fzf-async-highlight-max-candidates')."
+Highlighting is applied by the C layer (see `fzf-async-highlight')."
   (funcall table string pred t))
 
 ;;; Frontend abstraction
