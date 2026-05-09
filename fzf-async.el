@@ -139,69 +139,6 @@ Highlighting is applied by the C layer (see `fzf-async-highlight' and
 `fzf-async-highlight-max-candidates')."
   (funcall table string pred t))
 
-;;; Highlighting
-
-(defun fzf-async--pcm-highlight (pattern collection)
-  "Highlight with pcm-style for COLLECTION using PATTERN.
-
-Exact copy of `fussy--pcm-highlight'."
-  (completion-pcm--hilit-commonality pattern collection))
-
-(defun fzf-async--highlight-collection (pattern collection)
-  "Highlight COLLECTION using PATTERN.
-
-Shortened version of `fussy--highlight-collection'"
-  (when collection
-    (fzf-async--pcm-highlight pattern collection)))
-
-(defun fzf-async--recreate-regex-pattern (beforepoint afterpoint bounds)
-  "Utility function to create regex pattern for highlighting.
-
-Shortened version of `fussy--recreate-regex-pattern'."
-  (fzf-async--make-fzf-highlight-pattern
-   (concat (substring beforepoint (car bounds))
-           (substring afterpoint 0 (cdr bounds)))))
-
-(defun fzf-async--make-fzf-highlight-pattern (infix)
-  "Create a pcm pattern based on fzf rules for highlighting.
-INFIX is the fzf query string.
-
-Exact Copy of `fussy-make-fzf-highlight-pattern'."
-  (let ((tokens (split-string infix " " t))
-        (pattern (list 'prefix)))
-    (dolist (token tokens)
-      (cond
-       ;; inverse (skip for highlighting)
-       ((string-prefix-p "!" token) nil)
-       ;; OR operator (skip for highlighting to avoid breaking AND groups)
-       ((string= "|" token) nil)
-       ;; exact boundary-match (quoted both ends)
-       ((and (string-prefix-p "'" token)
-             (string-suffix-p "'" token)
-             (length> token 1))
-        (push 'any pattern)
-        (push (substring token 1 -1) pattern))
-       ;; exact-match (quoted)
-       ((string-prefix-p "'" token)
-        (push 'any pattern)
-        (push (substring token 1) pattern))
-       ;; prefix-exact-match
-       ((string-prefix-p "^" token)
-        (push 'any pattern)
-        (push (substring token 1) pattern))
-       ;; suffix-exact-match
-       ((string-suffix-p "$" token)
-        (push 'any pattern)
-        (push (substring token 0 -1) pattern))
-       ;; fuzzy
-       (t
-        (push 'any pattern)
-        (dolist (char (append token nil))
-          (push (string char) pattern)
-          (push 'any pattern))
-        (pop pattern)))) ;; remove last 'any
-    (completion-pcm--optimize-pattern (nreverse pattern))))
-
 ;;; Frontend abstraction
 
 (defun fzf-async--frontend-index ()
