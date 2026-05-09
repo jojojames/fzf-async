@@ -164,18 +164,20 @@ All commands open the selected candidate in Emacs.
 
 ** File finders
 
-| ~fzf-async~                | ~counsel~           | ~consult~               |
-|----------------------------+---------------------+-------------------------|
-| ~fzf-async-find~           | ~counsel-find-file~ | ~consult-find~          |
-| ~fzf-async-fd~             | —                   | ~consult-fd~            |
-| ~fzf-async-rg-files~       | —                   | ~consult-find~          |
-| ~fzf-async-ag-files~       | —                   | —                       |
-| ~fzf-async-git-ls-files~   | ~counsel-git~       | —                       |
-| ~fzf-async-hg-files~       | —                   | —                       |
-| ~fzf-async-recent-file~    | ~counsel-recentf~   | ~consult-recent-file~   |
-| ~fzf-async-locate~         | ~counsel-locate~    | ~consult-locate~        |
-| ~fzf-async-spotlight~      | —                   | —                       |
-| ~fzf-async-spotlight-apps~ | —                   | —                       |
+| ~fzf-async~                       | ~counsel~           | ~consult~             |
+|-----------------------------------+---------------------+-----------------------|
+| ~fzf-async-find~                  | ~counsel-find-file~ | ~consult-find~        |
+| ~fzf-async-fd~                    | —                   | ~consult-fd~          |
+| ~fzf-async-rg-files~              | —                   | ~consult-find~        |
+| ~fzf-async-ag-files~              | —                   | —                     |
+| ~fzf-async-git-ls-files~          | ~counsel-git~       | —                     |
+| ~fzf-async-hg-files~              | —                   | —                     |
+| ~fzf-async-recent-file~           | ~counsel-recentf~   | ~consult-recent-file~ |
+| ~fzf-async-locate~                | ~counsel-locate~    | ~consult-locate~      |
+| ~fzf-async-spotlight~             | —                   | —                     |
+| ~fzf-async-spotlight-apps~        | —                   | —                     |
+| ~fzf-async-shell-command~         | —                   | —                     |
+| ~fzf-async-project-shell-command~ | —                   | —                     |
 
 ** Emacs based
 
@@ -414,14 +416,36 @@ The prompt overlay shows live status during a search:
 : DIR IDX/[FILTERED](TOTAL)
 
 - ~DIR~ — abbreviated working directory
-- ~IDX~ — current selection index in vertico
+- ~IDX~ — current selection index (vertico, ivy)
 - ~FILTERED~ — candidates passing the current fzf query
 - ~TOTAL~ — total candidates collected from the shell command so far
 
 * Custom commands
 
-~fzf-async~ is designed to be extensible.  New commands are a thin wrapper
+~fzf-async~ is designed to be extensible.  New commands are thin wrappers
 around ~fzf-async-completing-read~, which accepts keyword arguments:
+
+| Argument                | Default                       | Description                        |
+|-------------------------+-------------------------------+------------------------------------|
+| ~:prompt~               | first token of ~:command~ + ~": "~ | Minibuffer prompt string.    |
+| ~:command~              | —                             | Shell command whose stdout becomes candidates. |
+| ~:directory~            | ~default-directory~           | Working directory for the command. |
+| ~:group~                | ~nil~                         | ~group-function~ for candidate grouping. |
+| ~:skip-executable-check~ | ~nil~                        | Skip the built-in ~executable-find~ guard on the first token of ~:command~. |
+
+The command string is passed verbatim to ~shell-file-name~ (~-c~), so pipes,
+redirections, and shell quoting all work as expected.
+
+~fzf-async-completing-read~ automatically checks that the first token of
+~:command~ is present in ~exec-path~ (via ~executable-find~) before starting
+the session.  Pass ~:skip-executable-check t~ when the command uses a shell
+builtin, alias, or has already been validated by the caller.
+~fzf-async-shell-command~ skips the check because the user's shell resolves
+aliases and builtins that ~executable-find~ cannot see.
+
+For one-off queries, ~fzf-async-shell-command~ prompts for a command
+interactively and runs it in ~default-directory~;
+~fzf-async-project-shell-command~ does the same from the project root.
 
 #+begin_src emacs-lisp :tangle yes
 ;;;###autoload
@@ -430,21 +454,11 @@ around ~fzf-async-completing-read~, which accepts keyword arguments:
 Opens the selected PDF with `open'."
   (interactive)
   (when-let* ((result (fzf-async-completing-read
-                       :prompt "spotlight: "
-                       :command (format "mdfind 'kMDItemFSName == \"*.pdf\"'"
-                                        (executable-find "mdfind"))
+                       :prompt "spotlight pdfs: "
+                       :command "mdfind 'kMDItemFSName == \"*.pdf\"'"
                        :directory default-directory)))
     (start-process "default-app" nil "open" result)))
 #+end_src
-
-| Argument     | Default             | Description                        |
-|--------------+---------------------+------------------------------------|
-| ~:prompt~    | ~"fzf > "~          | Minibuffer prompt string.          |
-| ~:command~   | ~find .~            | The shell command to run.          |
-| ~:directory~ | ~default-directory~ | Working directory for the command. |
-
-Use ~fzf-async--normalize~ to resolve the executable path and shell-quote
-arguments before passing the command string.
 
 * Comparison
 

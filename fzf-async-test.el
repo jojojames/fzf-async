@@ -2,60 +2,6 @@
 (require 'ert)
 (require 'fzf-async)
 
-;;; fzf-async--normalize
-
-;; Mock executable-find so tests are hermetic and don't depend on PATH.
-(defmacro fzf-async-test--with-mock-exe (&rest body)
-  "Run BODY with `executable-find' returning /mock/bin/<program>."
-  `(cl-letf (((symbol-function 'executable-find)
-               (lambda (prog) (concat "/mock/bin/" prog))))
-     ,@body))
-
-(ert-deftest fzf-async-normalize-resolves-executable ()
-  "The first token is replaced with the full executable path."
-  (fzf-async-test--with-mock-exe
-   (should (string-prefix-p "/mock/bin/git"
-                             (fzf-async--normalize "git ls-files")))))
-
-(ert-deftest fzf-async-normalize-preserves-args ()
-  "Arguments after the program name are preserved."
-  (fzf-async-test--with-mock-exe
-   (let ((result (fzf-async--normalize "git --no-pager log")))
-     (should (string-match-p "--no-pager" result))
-     (should (string-match-p "log" result)))))
-
-(ert-deftest fzf-async-normalize-empty-arg-single-quotes ()
-  "A bare '' argument becomes a shell-quoted empty string in output."
-  (fzf-async-test--with-mock-exe
-   (let ((result (fzf-async--normalize "grep -Rn ''")))
-     ;; shell-quote-argument on "" produces ''
-     (should (string-match-p "''" result)))))
-
-(ert-deftest fzf-async-normalize-empty-arg-double-quotes ()
-  "A bare \"\" argument becomes a shell-quoted empty string in output."
-  (fzf-async-test--with-mock-exe
-   (let ((result (fzf-async--normalize "git --no-pager grep -n \"\"")))
-     (should (string-match-p "''" result)))))
-
-(ert-deftest fzf-async-normalize-single-and-double-quote-equivalent ()
-  "'' and \"\" sentinels produce identical normalized output."
-  (fzf-async-test--with-mock-exe
-   (should (string= (fzf-async--normalize "git --no-pager grep -n ''")
-                    (fzf-async--normalize "git --no-pager grep -n \"\"")))))
-
-(ert-deftest fzf-async-normalize-shell-quotes-special-chars ()
-  "Arguments with spaces or special characters are shell-quoted."
-  (fzf-async-test--with-mock-exe
-   (let ((result (fzf-async--normalize "find . -name '*.el'")))
-     ;; *.el must appear quoted in the output
-     (should (string-match-p "\\*\\.el" result)))))
-
-(ert-deftest fzf-async-normalize-unknown-program-errors ()
-  "An unknown program signals a user-error."
-  (cl-letf (((symbol-function 'executable-find) (lambda (_) nil)))
-    (should-error (fzf-async--normalize "nonexistent-prog-xyz")
-                  :type 'user-error)))
-
 ;;; fzf-async--deduplicate-dirs
 
 (ert-deftest fzf-async-deduplicate-dirs-no-overlap ()
