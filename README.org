@@ -282,6 +282,7 @@ each input change.
 | ~icomplete~   | Full      | Refreshes via ~icomplete-exhibit~.                             |
 | ~fido~        | Full      | Built on ~icomplete~; works without extra configuration.       |
 | ~ivy/counsel~ | Supported | Push model via ~ivy--set-candidates~. See below.               |
+| ~helm~        | Supported | Dedicated source path; auto-dispatched when ~helm-mode~ is active. See below. |
 
 Caveat: I mostly use ~vertico~ these days so wasn't exhaustive with using the
 other completion systems.
@@ -303,6 +304,22 @@ used by counsel's async commands.  The stats prompt (directory, selection
 index, filtered/total counts) is delivered via ~ivy-pre-prompt-function~,
 which ivy prepends to the prompt string on each redraw.
 
+** helm
+
+When ~helm-mode~ is active, ~fzf-async-completing-read~ automatically
+dispatches to a dedicated ~fzf-async--helm-completing-read~ path — no
+extra configuration is needed.
+
+Helm uses a ~helm-source-sync~ source with ~:match-dynamic t~, which tells
+helm to call the ~:candidates~ function on every input change rather than
+holding its own filtered list.  ~:nohighlight t~ is set so helm does not
+apply its own highlighting on top of the C-side ~completions-common-part~
+faces already embedded in the candidate strings.
+
+A polling timer checks ~fzf-native-async-generation~ at
+~fzf-async-refresh-delay~ intervals and calls ~helm-force-update~ whenever
+the background scoring thread has produced new results, keeping the helm
+buffer live as candidates stream in.
 
 * Customization
 

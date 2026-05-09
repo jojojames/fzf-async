@@ -50,6 +50,11 @@
 (declare-function ivy--set-candidates "ivy")
 (declare-function ivy--exhibit "ivy")
 (defvar ivy-pre-prompt-function)
+(defvar helm-alive-p)
+(defvar helm-pattern)
+(declare-function helm "helm-core")
+(declare-function helm-make-source "helm-source")
+(declare-function helm-force-update "helm-core")
 
 ;;; Debug logging
 
@@ -188,6 +193,58 @@ via the `ivy-push' closure in `fzf-async-completing-read': calling
 
 ;;; Completing-read
 
+(cl-defun fzf-async--helm-completing-read (&key prompt command directory)
+  "Helm path for `fzf-async-completing-read'.
+Starts an fzf-native async session and opens a helm buffer driven by a
+`helm-source-sync' with `:match-dynamic t' so helm never re-filters the
+already-scored candidates.  A timer polls the C-side generation counter and
+calls `helm-force-update' when new results arrive.
+Returns the selected candidate string, or nil on cancel."
+  (require 'helm)
+  (require 'helm-source)
+  (let* ((dir     (expand-file-name (or directory default-directory)))
+         (handle  (fzf-native-async-start command dir))
+         (limit   (and fzf-async-max-candidates
+                       (> fzf-async-max-candidates 0)
+                       fzf-async-max-candidates))
+         (last-gen -1)
+         (stopped  nil)
+         (result   nil)
+         (cleanup  (lambda ()
+                     (unless stopped
+                       (setq stopped t)
+                       (fzf-native-async-stop handle))))
+         timer)
+    (setq timer
+          (run-with-timer
+           0 fzf-async-refresh-delay
+           (lambda ()
+             (when helm-alive-p
+               (let ((gen (fzf-native-async-generation handle)))
+                 (when (and gen (> gen last-gen))
+                   (setq last-gen gen)
+                   (helm-force-update)))))))
+    (unwind-protect
+        (let ((default-directory dir))
+          (helm
+           :sources
+           (helm-make-source (or prompt "fzf") 'helm-source-sync
+             :header-name
+             (lambda (name)
+               (format "%s [%s]" name (abbreviate-file-name dir)))
+             :candidates
+             (lambda ()
+               (fzf-native-async-candidates handle helm-pattern limit))
+             :match-dynamic t
+             :nohighlight t
+             :candidate-number-limit (or limit 10000)
+             :cleanup cleanup
+             :action (lambda (cand) (setq result cand)))
+           :buffer "*helm fzf-async*"))
+      (cancel-timer timer)
+      (funcall cleanup))
+    result))
+
 ;;;###autoload
 (cl-defun fzf-async-completing-read (&key
                                      (prompt "fzf > ")
@@ -205,6 +262,10 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
   IDX      — current selection index (omitted for frontends without one)
   FILTERED — candidates matching the current query
   TOTAL    — total candidates collected so far"
+  (when (bound-and-true-p helm-mode)
+    (cl-return-from fzf-async-completing-read
+      (fzf-async--helm-completing-read
+       :prompt prompt :command command :directory directory)))
   (let* ((handle (fzf-native-async-start command (expand-file-name directory)))
          (dir (abbreviate-file-name directory))
          (last-gen -1)
