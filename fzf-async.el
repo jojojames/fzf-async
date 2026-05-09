@@ -100,11 +100,16 @@ pauses typing the display always self-heals regardless of this value."
   :type 'float
   :group 'fzf-async)
 
-(defcustom fzf-async-highlight t
-  "If non-nil, highlight matched characters in completion candidates.
-Set to nil for plain output, which is faster and works better on
-terminals that do not render faces well."
-  :type 'boolean
+(defcustom fzf-async-highlight 200
+  "Controls C-side match highlighting of completion candidates.
+nil or a negative integer — no highlighting.
+t                        — highlight every returned candidate.
+a positive integer N     — highlight only the top N candidates.
+The C layer applies `completions-common-part' face to each contiguous
+run of matched bytes via fzf_get_positions."
+  :type '(choice (const   :tag "Disabled" nil)
+                 (const   :tag "All candidates" t)
+                 (integer :tag "Top N candidates"))
   :group 'fzf-async)
 
 (defcustom fzf-async-project-backend 'project
@@ -127,20 +132,12 @@ function   Call the function with no arguments;
 Always accepts STRING as-is; scoring is done in C."
   (cons string (length string)))
 
-(defun fzf-async-all-completions (string table pred point)
+(defun fzf-async-all-completions (string table pred _point)
   "All-completions for the fzf-async completion style.
-Passes STRING through to the collection TABLE without transformation,
-preventing other styles (e.g. fussy) from re-filtering pre-scored results."
-  (let* ((beforepoint (substring string 0 point))
-         (afterpoint (substring string point))
-         (bounds (completion-boundaries beforepoint table pred afterpoint)))
-    (if fzf-async-highlight
-        (when-let* ((collection (funcall table string pred t)))
-          (fzf-async--highlight-collection
-           (fzf-async--recreate-regex-pattern
-            beforepoint afterpoint bounds)
-           collection))
-      (funcall table string pred t))))
+Passes STRING through to the collection TABLE without transformation.
+Highlighting is applied by the C layer (see `fzf-async-highlight' and
+`fzf-async-highlight-max-candidates')."
+  (funcall table string pred t))
 
 ;;; Highlighting
 
