@@ -952,10 +952,50 @@ so fzf receives an initial empty-query argument."
                (cons exe args)
                " ")))
 
+;;; Shell command
+
+(defvar fzf-async-shell-command-history nil
+  "Minibuffer history for `fzf-async-shell-command'.")
+
+;;;###autoload
+(defun fzf-async-shell-command (command &optional directory)
+  "Fuzzy-search the output of a user-provided shell COMMAND.
+Runs in DIRECTORY, defaulting to `default-directory'.
+COMMAND is passed verbatim to `shell-file-name', so pipes,
+redirections, and shell quoting all work as expected.  The selected
+candidate is opened as a file if it exists relative to the working
+directory; otherwise it is placed in the kill ring."
+  (interactive
+   (list (read-shell-command "Shell command: " nil 'fzf-async-shell-command-history)))
+  (let* ((cmd (string-trim command))
+         (dir (or directory default-directory)))
+    (when (string-empty-p cmd)
+      (user-error "Command cannot be empty"))
+    (when-let* ((result (fzf-async-completing-read
+                         :prompt (format "%s » " cmd)
+                         :command cmd
+                         :directory dir)))
+      (let ((path (expand-file-name result dir)))
+        (if (file-exists-p path)
+            (find-file path)
+          (kill-new result)
+          (message "%s" result))))))
+
+;;;###autoload
+(defun fzf-async-project-shell-command (command)
+  "Fuzzy-search the output of a user-provided shell COMMAND.
+Like `fzf-async-shell-command' but runs in the project root."
+  (interactive
+   (list (read-shell-command "Shell command: "
+                             nil 'fzf-async-shell-command-history)))
+  (fzf-async-shell-command command (fzf-async--project-dir)))
+
 ;;; Setup
 
 (defconst fzf-async--commands
-  '(fzf-async-find
+  '(fzf-async-shell-command
+    fzf-async-project-shell-command
+    fzf-async-find
     fzf-async-fd
     fzf-async-rg-files
     fzf-async-ag-files
