@@ -104,6 +104,25 @@ For the C-side mechanics — what =score_abort= does, how the same-
 filter rule prevents livelock, how the arena handles teardown — see
 =fzf-native/architecture.org=.
 
+** Result cache (C-side, =fzf_native_async_candidates=)
+
+Each session maintains an LRU cache (up to =fzf-async-cache-size= entries,
+default 20) mapping =(filter, pool_gen)= to a scored snapshot. On each
+=fzf_native_async_candidates= call one of three outcomes occurs:
+
+| Outcome                 | Condition                                              | Effect                                                              |
+|-------------------------+--------------------------------------------------------+---------------------------------------------------------------------|
+| Exact fresh             | Same filter, pool has not grown since last score       | Cached snapshot returned; no scoring dispatched                     |
+| Exact stale / prefix hit | Same filter with new pool entries, or current filter extends a cached filter | Cached snapshot returned immediately; scoring restricted to matched_idx ∪ new candidates |
+| Miss                    | No usable cache entry                                  | Stale =score_results= returned; full scoring dispatched             |
+
+The prefix-hit path is what makes incremental typing fast: typing "foo"
+after "fo" rescores only the candidates that matched "fo", not the full
+pool. The cache size is configurable via =fzf-async-cache-size=.
+
+For LRU eviction details, =SharedIdx= refcounting, and the subsumption
+rule, see =fzf-native/architecture.org= § "Result cache".
+
 * Sync pipeline — =fzf-sync-completing-read=
 
 When the candidate list is already an in-memory Elisp list (e.g. SSH
@@ -143,7 +162,7 @@ mangles fzf syntax. So we register a passthrough:
 | Function                       | Behavior                                                |
 |--------------------------------+---------------------------------------------------------|
 | =fzf-async-try-completion=     | Returns =(cons string (length string))= — no prefix expansion |
-| =fzf-async-all-completions=    | Calls collection lambda with the *raw* query, returns =(nconc cands 0)= |
+| =fzf-async-all-completions=    | Calls =(funcall table string pred t)= — raw passthrough, no PCM or fussy re-filtering. Candidates arrive pre-scored and pre-highlighted from the C module. |
 | =fzf-async-setup= (autoload)   | Registers the style and pins it for the =fzf-async= and =fzf-async-file= categories via =completion-category-overrides= |
 
 The collection lambda's metadata returns =(category . fzf-async)= (or
@@ -159,6 +178,44 @@ without the marginalia → file-category override pulling them back
 into fussy's filtering. See History → "Marginalia interaction is
 broken" in =project.org= for the full diagnosis.
 
+* C-side match highlighting
+
+Matched characters are highlighted inside =fzf_native_async_candidates=
+before strings reach the Elisp layer, so no Elisp regex pass is needed.
+
+The old approach — =completion-pcm--hilit-commonality= called from
+=fzf-async-all-completions= — built a PCM pattern with one =any= token per
+query character, which Emacs compiled to a regex with N nested =.*= groups.
+This caused exponential backtracking on non-matching candidates. For a 32-
+character query with 1038 candidates the hang was 18 seconds.
+
+The current approach:
+
+1. In =fzf_native_async_candidates=, after dispatching the scoring job, the
+   C code reads =fzf-async-highlight= via =symbol-value=:
+   - =nil= → skip highlighting.
+   - =t= → highlight all returned candidates (=hl_cap = rcount=).
+   - Integer N → highlight the top N candidates (=hl_cap = N=).
+2. Parse =filter_for_hilit= into an =fzf_pattern_t= (one shared pattern for
+   the whole highlight pass).
+3. For each =snap[0..hl_cap-1]= (highest-scoring candidates, prepended last
+   so they land at the front of the returned list):
+   - =fzf_get_positions(str, pattern, slab)= → =pos->data[]= in descending
+     byte-offset order.
+   - Iterate ascending, merge adjacent offsets into runs, call
+     =put-text-property= once per run with =face=completions-common-part=.
+4. Free pattern and slab before returning.
+
+The Emacs string object already has the face applied when it is consed into
+the result list. Frontends (vertico, icomplete) display it without any
+further Elisp highlighting work.
+
+*Byte vs. character positions:* =fzf_get_positions= returns byte offsets;
+=put-text-property= uses character positions. For ASCII candidates (the
+common case) these are identical. Multi-byte UTF-8 candidates may have
+slightly misaligned face ranges — acceptable and consistent with the
+limitation in fussy's fzf-based highlighting.
+
 * Frontend abstraction
 
 Two helpers route around vertico/icomplete/ivy differences:
@@ -170,8 +227,7 @@ Two helpers route around vertico/icomplete/ivy differences:
 
 ivy uses a *push* model rather than pull, so it has its own dedicated
 path: a closure pushes via =ivy--set-candidates= then redraws via
-=ivy--exhibit=. ivy bypasses =completion-styles= entirely —
-highlighting does not work under ivy as a known limitation.
+=ivy--exhibit=. ivy bypasses =completion-styles= entirely.
 
 * Timer model (async path only)
 

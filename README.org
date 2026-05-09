@@ -303,32 +303,62 @@ used by counsel's async commands.  The stats prompt (directory, selection
 index, filtered/total counts) is delivered via ~ivy-pre-prompt-function~,
 which ivy prepends to the prompt string on each redraw.
 
-*Highlighting caveat:* match highlighting does not work perfectly *yet*
-with ivy.  Ivy bypasses ~completion-styles~ entirely and does not call
-the ~all-completions~ function where ~fzf-async~ applies face properties
-to matched characters.
-
-Help appreciated.
 
 * Customization
 
-| Variable                      | Default   | Description                                          |
-|-------------------------------+-----------+------------------------------------------------------|
-| ~fzf-async-max-candidates~    | 10000     | Max candidates returned to Elisp (see note below).  |
-| ~fzf-async-refresh-delay~     | 0.05      | Seconds between generation polls.                   |
-| ~fzf-async-input-debounce~    | 0.1       | Idle seconds to retry after input.                  |
-| ~fzf-async-input-throttle~    | 0.2       | Min seconds between refreshes.                      |
-| ~fzf-async-project-backend~   | ~project~ | How to resolve the root directory (see note below). |
-| ~fzf-async-highlight~         | ~t~       | Highlight matched characters in candidates.         |
+| Variable                       | Default   | Description                                            |
+|--------------------------------+-----------+--------------------------------------------------------|
+| ~fzf-async-max-candidates~     | 10000     | Max candidates returned to Elisp (see note below).    |
+| ~fzf-async-refresh-delay~      | 0.05      | Seconds between generation polls.                     |
+| ~fzf-async-input-debounce~     | 0.1       | Idle seconds to retry after an interrupted scoring.   |
+| ~fzf-async-input-throttle~     | 0.2       | Min seconds between UI refreshes driven by new data.  |
+| ~fzf-async-project-backend~    | ~project~ | How to resolve the root directory (see note below).   |
+| ~fzf-async-highlight~          | 200       | C-side match highlighting; nil/t/N (see note below).  |
+| ~fzf-async-max-line-length~    | ~t~       | Per-line character limit; nil/t/+N/-N (see note below). |
+| ~fzf-async-cache-size~         | 20        | LRU cache entries per session; increase for heavy backtracking. |
 
-~fzf-async-highlight~ controls whether matched characters are highlighted in
-the completion list.  Highlighting requires a second pass over the candidate
-list in Elisp (via ~completion-pcm--hilit-commonality~) after the C scoring
-pass.  For very large candidate sets or slower machines this can be a
-noticeable cost.  Set it to ~nil~ for plain output with no extra Elisp work:
+~fzf-async-highlight~ controls C-side match highlighting.  After the scoring
+pass, the C module calls ~fzf_get_positions~ for the top N candidates and
+applies the ~completions-common-part~ face to each contiguous run of matched
+characters via ~put-text-property~.  This happens entirely inside the C module
+before strings are handed to Emacs, so there is no Elisp regex overhead.
+
+The defcustom accepts three forms:
+
+| Value | Behavior                                      |
+|-------+-----------------------------------------------|
+| ~nil~ | No highlighting.                              |
+| ~t~   | Highlight every returned candidate.           |
+| N     | Highlight the top N candidates (default 200). |
+
+Setting a cap rather than always highlighting all candidates is intentional:
+~fzf_get_positions~ is cheap but not free, and users cannot see more than
+~20–50 candidates without scrolling.  200 provides comfortable headroom.
 
 #+begin_src emacs-lisp :tangle yes
-  (setq fzf-async-highlight nil)
+  (setq fzf-async-highlight nil)   ; disable entirely
+  (setq fzf-async-highlight t)     ; highlight all returned candidates
+  (setq fzf-async-highlight 500)   ; highlight top 500
+#+end_src
+
+~fzf-async-max-line-length~ filters lines from the subprocess before they
+enter the candidate pool.  Minified JavaScript, base64 payloads, and other
+pathologically long lines slow scoring and produce unreadable candidates.
+
+| Value  | Behavior                                               |
+|--------+--------------------------------------------------------|
+| ~nil~  | No limit — every line is accepted unchanged.           |
+| ~t~    | Apply a built-in default of 512 characters (default). |
+| ~+N~   | Exclude lines longer than N characters.                |
+| ~-N~   | Include but truncate to N characters.                  |
+
+The check fires in the reader thread immediately after ANSI stripping, before
+any allocation, so oversized lines never reach the scoring path.
+
+#+begin_src emacs-lisp :tangle yes
+  (setq fzf-async-max-line-length t)     ; exclude lines > 512 chars
+  (setq fzf-async-max-line-length 300)   ; exclude lines > 300 chars
+  (setq fzf-async-max-line-length -300)  ; truncate to 300 chars, keep all
 #+end_src
 
 ~fzf-async-max-candidates~ caps only the number of strings consed into the
@@ -425,7 +455,11 @@ arguments before passing the command string.
     the final filtering and sorting.
   - *Ranking*: Both ~affe~ and ~orderless~ do not do any scoring or matching.
   - *Performance*: affe calls out to an external process for the initial
-    filtering but a lot of postprocessing runs in Elisp.
+    filtering but a lot of postprocessing runs in Elisp. (e.g. calculating
+    highlights or general list processing)
+  A quick eye test against the home directory using ~affe-grep~ vs ~fzf-async-rg~
+  shows about 1-2 million candidates processed after a few seconds compared to
+  ~fzf-async~ which hits 10-20 million in the same time span.
 
 (This comparison is on best efforts, so might be inaccurate. :))
 
@@ -434,8 +468,8 @@ In comparison to similar preexisting packages like ~Consult~/~Counsel~,
 
 *Speed.* fzf scoring runs multithreaded in C with a counting-sort final
 pass that is O(n + max_score).  Results stream incrementally so the UI
-stays responsive with *millions* of candidates.  The goal is to match the
-performance of ~fzf~ in the terminal from within Emacs.
+stays responsive with *millions* of candidates.  The goal is to match or
+exceed the performance of ~fzf~ in the terminal from within Emacs.
 
 *True fuzzy matching.* A single query string is used for both filtering
 and scoring in one pass — no two-stage conflict, no mismatches between
@@ -443,7 +477,7 @@ what the shell tool matched and what the completion framework ranked.
 
 *Simplicity.* ~fzf-async.el~ is roughly 1000 lines of Emacs Lisp, most of
 which declares the built-in commands and ~fzf-native-module.c~ is also
-roughly 1000 lines.
+roughly 2000 lines.
 
 ** Downsides
 ~fzf-async~ requires
