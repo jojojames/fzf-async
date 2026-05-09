@@ -176,6 +176,7 @@ All commands open the selected candidate in Emacs.
 | ~fzf-async-locate~                | ~counsel-locate~    | ~consult-locate~      |
 | ~fzf-async-spotlight~             | —                   | —                     |
 | ~fzf-async-spotlight-apps~        | —                   | —                     |
+| ~fzf-async-spotlight-audio~       | —                   | —                     |
 | ~fzf-async-shell-command~         | —                   | —                     |
 | ~fzf-async-project-shell-command~ | —                   | —                     |
 

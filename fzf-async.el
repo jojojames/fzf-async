@@ -708,7 +708,7 @@ Selecting a candidate opens the file at that line."
   (interactive)
   (when-let* ((result (fzf-async-completing-read
                        :prompt "spotlight: "
-                       :command "mdfind .")))
+                       :command "mdfind 'kMDItemFSName != ''")))
     (if (string-suffix-p ".app" result)
         (start-process "default-app" nil "open" result)
       (find-file result))))
@@ -716,11 +716,24 @@ Selecting a candidate opens the file at that line."
 ;;;###autoload
 (defun fzf-async-spotlight-apps ()
   "Find an installed application using Spotlight.
-Searches /Applications for *.app bundles and opens the selection with `open'."
+Opens the selection with `open'."
+  (interactive)
+  (when-let*
+      ((result
+        (fzf-async-completing-read
+         :prompt "spotlight: "
+         :command
+         "mdfind 'kMDItemContentTypeTree == \"com.apple.application-bundle\"'")))
+    (start-process "default-app" nil "open" result)))
+
+;;;###autoload
+(defun fzf-async-spotlight-audio ()
+  "Find audio and play it using Spotlight."
   (interactive)
   (when-let* ((result (fzf-async-completing-read
                        :prompt "spotlight: "
-                       :command "mdfind 'kMDItemFSName == \"*.app\"'")))
+                       :command
+                       "mdfind 'kMDItemContentTypeTree == \"public.audio\"'")))
     (start-process "default-app" nil "open" result)))
 
 ;;;###autoload
@@ -1007,6 +1020,7 @@ Like `fzf-async-shell-command' but runs in the project root."
     fzf-async-locate
     fzf-async-spotlight
     fzf-async-spotlight-apps
+    fzf-async-spotlight-audio
     fzf-async-swiper-hungry
     fzf-async-find-hungry)
   "All fzf-async commands that use `fzf-async-completing-read'.")
@@ -1020,7 +1034,8 @@ Like `fzf-async-shell-command' but runs in the project root."
     fzf-async-hg-files
     fzf-async-locate
     fzf-async-spotlight
-    fzf-async-spotlight-apps)
+    fzf-async-spotlight-apps
+    fzf-async-spotlight-audio)
   "fzf-async commands whose candidates are plain file paths.
 These are registered with marginalia under the `file' category so
 marginalia can annotate them with file size and modification time.
