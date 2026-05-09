@@ -104,25 +104,6 @@ For the C-side mechanics — what =score_abort= does, how the same-
 filter rule prevents livelock, how the arena handles teardown — see
 =fzf-native/architecture.org=.
 
-** Result cache (C-side, =fzf_native_async_candidates=)
-
-Each session maintains an LRU cache (up to =fzf-async-cache-size= entries,
-default 20) mapping =(filter, pool_gen)= to a scored snapshot. On each
-=fzf_native_async_candidates= call one of three outcomes occurs:
-
-| Outcome                 | Condition                                              | Effect                                                              |
-|-------------------------+--------------------------------------------------------+---------------------------------------------------------------------|
-| Exact fresh             | Same filter, pool has not grown since last score       | Cached snapshot returned; no scoring dispatched                     |
-| Exact stale / prefix hit | Same filter with new pool entries, or current filter extends a cached filter | Cached snapshot returned immediately; scoring restricted to matched_idx ∪ new candidates |
-| Miss                    | No usable cache entry                                  | Stale =score_results= returned; full scoring dispatched             |
-
-The prefix-hit path is what makes incremental typing fast: typing "foo"
-after "fo" rescores only the candidates that matched "fo", not the full
-pool. The cache size is configurable via =fzf-async-cache-size=.
-
-For LRU eviction details, =SharedIdx= refcounting, and the subsumption
-rule, see =fzf-native/architecture.org= § "Result cache".
-
 * Sync pipeline — =fzf-sync-completing-read=
 
 When the candidate list is already an in-memory Elisp list (e.g. SSH

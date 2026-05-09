@@ -336,7 +336,6 @@ buffer live as candidates stream in.
 | ~fzf-async-project-backend~    | ~project~ | How to resolve the root directory (see note below).   |
 | ~fzf-async-highlight~          | 200       | C-side match highlighting; nil/t/N (see note below).  |
 | ~fzf-async-max-line-length~    | ~t~       | Per-line character limit; nil/t/+N/-N (see note below). |
-| ~fzf-async-cache-size~         | 20        | LRU cache entries per session; increase for heavy backtracking. |
 
 ~fzf-async-highlight~ controls C-side match highlighting.  After the scoring
 pass, the C module calls ~fzf_get_positions~ for the top N candidates and
