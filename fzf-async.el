@@ -141,6 +141,16 @@ Takes effect at session start; changing it does not affect running sessions."
   :type 'integer
   :group 'fzf-async)
 
+(defvar fzf-async-directory nil
+  "Per-call directory override for fzf-async commands.
+When non-nil, supersedes `fzf-async-project-backend' and `default-directory'.
+Intended for `let'-binding when extending built-in commands:
+
+  (let ((fzf-async-directory default-directory))
+    (fzf-async-rg))
+
+Priority: `fzf-async-directory' > project backend > `default-directory'.")
+
 (defcustom fzf-async-project-backend 'project
   "How to resolve the root directory for fzf-async commands.
 project    Use `project.el' to find the project root (default, matches consult).
@@ -885,9 +895,10 @@ TRANSFORM non-nil → strip the filename prefix; display LINE:CONTENT only."
       (if i (substring cand 0 i) cand))))
 
 (defun fzf-async--default-dir ()
-  "Return the root directory for fzf-async commands.
-Respects `fzf-async-project-backend'; falls back to `default-directory'."
-  (or (pcase fzf-async-project-backend
+  "Return the working directory for fzf-async commands.
+Priority: `fzf-async-directory' > `fzf-async-project-backend' > `default-directory'."
+  (or fzf-async-directory
+      (pcase fzf-async-project-backend
         ((pred functionp)
          (funcall fzf-async-project-backend))
         ('project

@@ -331,6 +331,7 @@ buffer live as candidates stream in.
 | ~fzf-async-refresh-delay~      | 0.05      | Seconds between generation polls.                     |
 | ~fzf-async-input-debounce~     | 0.1       | Idle seconds to retry after an interrupted scoring.   |
 | ~fzf-async-input-throttle~     | 0.2       | Min seconds between UI refreshes driven by new data.  |
+| ~fzf-async-directory~          | ~nil~     | Per-call directory override; supersedes project backend (see note below). |
 | ~fzf-async-project-backend~    | ~project~ | How to resolve the root directory (see note below).   |
 | ~fzf-async-highlight~          | 200       | C-side match highlighting; nil/t/N (see note below).  |
 | ~fzf-async-max-line-length~    | ~t~       | Per-line character limit; nil/t/+N/-N (see note below). |
@@ -392,6 +393,20 @@ slowest part of the algorithm. Even converting C strings to Emacs strings
 can be a burden when the total collection size is millions of candidates.
 In practice, the cap should not be an issue (and is configurable anyways)
 since it's returning the top N candidates at any one time.
+
+~fzf-async-directory~ is a ~let~-bindable override that takes priority over
+project detection.  Use it when extending a built-in command that you want
+to run in the current directory rather than the project root:
+
+#+begin_src emacs-lisp :tangle yes
+  (defun my-rg-here ()
+    (interactive)
+    (let ((fzf-async-directory default-directory))
+      (fzf-async-rg)))
+#+end_src
+
+The full priority chain is:
+~fzf-async-directory~ > ~fzf-async-project-backend~ > ~default-directory~
 
 ~fzf-async-project-backend~ controls which directory file-search and grep
 commands run in.  The default ~project~ matches the behavior of ~consult~.
