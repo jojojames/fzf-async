@@ -40,6 +40,9 @@
 
 (defvar embark-keymap-alist)
 (defvar fzf-native-case-mode)
+(defvar fzf-native-async-highlight)
+(defvar fzf-native-max-line-length)
+(defvar fzf-native-async-cache-size)
 (defvar marginalia-annotate-file)
 (defvar marginalia-annotator-registry)
 (defvar marginalia-command-categories)
@@ -278,7 +281,9 @@ Returns the selected candidate string, or nil on cancel."
               (format "%s [%s]" name (abbreviate-file-name dir)))
             :candidates
             (lambda ()
-              (setq-local fzf-native-case-mode fzf-async-case-mode)
+              ;; case-mode and other defcustoms are bridged onto the
+              ;; canonical fzf-native names by :around advice on
+              ;; `fzf-native-async-candidates' (see EOF).
               (fzf-native-async-candidates handle helm-pattern limit))
             :match-dynamic t
             :nohighlight t
@@ -394,7 +399,10 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
       (unwind-protect
           (minibuffer-with-setup-hook
               (lambda ()
-                (setq-local fzf-native-case-mode fzf-async-case-mode)
+                ;; case-mode and other defcustoms are bridged onto the
+                ;; canonical fzf-native names by :around advice on
+                ;; `fzf-native-async-candidates' (see EOF), so no
+                ;; setq-local needed here for the async path.
                 (when (boundp 'vertico-count-format)
                   (setq-local vertico-count-format nil))
                 (when (boundp 'icomplete-matches-format)
@@ -494,32 +502,30 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
             TRANSFORM is nil return the group name; when non-nil return
             the display string for CANDIDATE within its group.  Frontends
             like vertico render group headers between sections."
-  (minibuffer-with-setup-hook
-      (lambda ()
-        (setq-local fzf-native-case-mode fzf-async-case-mode))
-    (completing-read
-     prompt
-     (lambda (str _pred action)
-       (pcase action
-         ('metadata
-          `(metadata
-            (category . ,category)
-            (display-sort-function . identity)
-            (cycle-sort-function . identity)
-            ,@(when annotate `((annotation-function  . ,annotate)))
-            ,@(when affix    `((affixation-function  . ,affix)))
-            ,@(when group    `((group-function       . ,group)))))
-         (`(boundaries . ,_) (cons 0 0))
-         ('lambda t)
-         ('t (let ((query (if (not (string-empty-p str))
-                              str
-                            (when-let* ((win (active-minibuffer-window)))
-                              (with-current-buffer (window-buffer win)
-                                (minibuffer-contents-no-properties))))))
-               (if (or (null query) (string-empty-p query))
-                   candidates
-                 (fzf-native-score-all candidates query))))))
-     nil t nil nil nil)))
+  (completing-read
+   prompt
+   (lambda (str _pred action)
+     (pcase action
+       ('metadata
+        `(metadata
+          (category . ,category)
+          (display-sort-function . identity)
+          (cycle-sort-function . identity)
+          ,@(when annotate `((annotation-function  . ,annotate)))
+          ,@(when affix    `((affixation-function  . ,affix)))
+          ,@(when group    `((group-function       . ,group)))))
+       (`(boundaries . ,_) (cons 0 0))
+       ('lambda t)
+       ('t (let ((query (if (not (string-empty-p str))
+                            str
+                          (when-let* ((win (active-minibuffer-window)))
+                            (with-current-buffer (window-buffer win)
+                              (minibuffer-contents-no-properties))))))
+             (if (or (null query) (string-empty-p query))
+                 candidates
+               (fzf-async--bridge-defcustoms
+                #'fzf-native-score-all candidates query))))))
+   nil t nil nil nil))
 
 ;;; Commands
 
@@ -1090,6 +1096,20 @@ via `completion-category-overrides' only"))
      "fzf-async is missing from `completion-category-overrides'.  \
 Call `fzf-async-setup' before using fzf-async commands")))
 
+(defun fzf-async--bridge-defcustoms (orig-fn &rest args)
+  "Wrap a fzf-native call so the C scorer sees fzf-async-* values.
+
+Bridges four knobs:
+  `fzf-async-highlight'       -> `fzf-native-async-highlight'
+  `fzf-async-max-line-length' -> `fzf-native-max-line-length'
+  `fzf-async-cache-size'      -> `fzf-native-async-cache-size'
+  `fzf-async-case-mode'       -> `fzf-native-case-mode'"
+  (let ((fzf-native-async-highlight  fzf-async-highlight)
+        (fzf-native-max-line-length  fzf-async-max-line-length)
+        (fzf-native-async-cache-size fzf-async-cache-size)
+        (fzf-native-case-mode        fzf-async-case-mode))
+    (apply orig-fn args)))
+
 ;;;###autoload
 (defun fzf-async-setup ()
   "Register the fzf-async completion style and category override.
@@ -1099,6 +1119,10 @@ Call this once during init before using `fzf-async-completing-read'."
                            "Passthrough style for pre-scored async fzf completions."))
   (add-to-list 'completion-category-overrides
                '(fzf-async (styles fzf-async)))
+
+  (advice-add 'fzf-native-async-start      :around #'fzf-async--bridge-defcustoms)
+  (advice-add 'fzf-native-async-candidates :around #'fzf-async--bridge-defcustoms)
+
   ;; fzf-async-file uses the same passthrough style as fzf-async, but lets
   ;; Marginalia annotate candidates with file metadata (size, date).  It must
   ;; NOT use the built-in `file' category: Marginalia would then override the
