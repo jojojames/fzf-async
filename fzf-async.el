@@ -39,6 +39,7 @@
   :link '(url-link :tag "GitHub" "https://github.com/jojojames/fzf-async"))
 
 (defvar embark-keymap-alist)
+(defvar fzf-native-case-mode)
 (defvar marginalia-annotate-file)
 (defvar marginalia-annotator-registry)
 (defvar marginalia-command-categories)
@@ -132,6 +133,21 @@ sees the excess characters."
   :type '(choice (const   :tag "No limit" nil)
                  (const   :tag "Default (512)" t)
                  (integer :tag "N (positive = exclude, negative = truncate)"))
+  :group 'fzf-async)
+
+(defcustom fzf-async-case-mode 'smart
+  "Case-sensitivity mode propagated to `fzf-native-case-mode'.
+Mirrors fzf-native's enum:
+smart    Case-insensitive when the query is all lowercase; case-sensitive
+         once it contains any uppercase character (fzf's default).
+ignore   Always case-insensitive.
+respect  Always case-sensitive.
+
+Applied via `setq-local' inside each fzf-async completing-read function
+so the C scorer sees the chosen mode for the duration of the session."
+  :type '(choice (const :tag "Smart case (default)" smart)
+                 (const :tag "Ignore case"          ignore)
+                 (const :tag "Respect case"         respect))
   :group 'fzf-async)
 
 (defcustom fzf-async-cache-size 40
@@ -262,6 +278,7 @@ Returns the selected candidate string, or nil on cancel."
               (format "%s [%s]" name (abbreviate-file-name dir)))
             :candidates
             (lambda ()
+              (setq-local fzf-native-case-mode fzf-async-case-mode)
               (fzf-native-async-candidates handle helm-pattern limit))
             :match-dynamic t
             :nohighlight t
@@ -377,6 +394,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
       (unwind-protect
           (minibuffer-with-setup-hook
               (lambda ()
+                (setq-local fzf-native-case-mode fzf-async-case-mode)
                 (when (boundp 'vertico-count-format)
                   (setq-local vertico-count-format nil))
                 (when (boundp 'icomplete-matches-format)
@@ -476,29 +494,32 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
             TRANSFORM is nil return the group name; when non-nil return
             the display string for CANDIDATE within its group.  Frontends
             like vertico render group headers between sections."
-  (completing-read
-   prompt
-   (lambda (str _pred action)
-     (pcase action
-       ('metadata
-        `(metadata
-          (category . ,category)
-          (display-sort-function . identity)
-          (cycle-sort-function . identity)
-          ,@(when annotate `((annotation-function  . ,annotate)))
-          ,@(when affix    `((affixation-function  . ,affix)))
-          ,@(when group    `((group-function       . ,group)))))
-       (`(boundaries . ,_) (cons 0 0))
-       ('lambda t)
-       ('t (let ((query (if (not (string-empty-p str))
-                            str
-                          (when-let* ((win (active-minibuffer-window)))
-                            (with-current-buffer (window-buffer win)
-                              (minibuffer-contents-no-properties))))))
-             (if (or (null query) (string-empty-p query))
-                 candidates
-               (fzf-native-score-all candidates query))))))
-   nil t nil nil nil))
+  (minibuffer-with-setup-hook
+      (lambda ()
+        (setq-local fzf-native-case-mode fzf-async-case-mode))
+    (completing-read
+     prompt
+     (lambda (str _pred action)
+       (pcase action
+         ('metadata
+          `(metadata
+            (category . ,category)
+            (display-sort-function . identity)
+            (cycle-sort-function . identity)
+            ,@(when annotate `((annotation-function  . ,annotate)))
+            ,@(when affix    `((affixation-function  . ,affix)))
+            ,@(when group    `((group-function       . ,group)))))
+         (`(boundaries . ,_) (cons 0 0))
+         ('lambda t)
+         ('t (let ((query (if (not (string-empty-p str))
+                              str
+                            (when-let* ((win (active-minibuffer-window)))
+                              (with-current-buffer (window-buffer win)
+                                (minibuffer-contents-no-properties))))))
+               (if (or (null query) (string-empty-p query))
+                   candidates
+                 (fzf-native-score-all candidates query))))))
+     nil t nil nil nil)))
 
 ;;; Commands
 
