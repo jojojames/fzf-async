@@ -743,7 +743,8 @@ Selecting a candidate opens the file at that line."
                                     (string-prefix-p " " (buffer-name b)))
                          collect (buffer-name b))))
     (when-let* ((result (fzf-sync-completing-read
-                         :candidates names :prompt "buffer: ")))
+                         :candidates names :prompt "buffer: "
+                         :category 'fzf-async-buffer)))
       (switch-to-buffer result))))
 
 ;;;###autoload
@@ -1174,17 +1175,30 @@ Call this once during init before using `fzf-async-completing-read'."
   (add-to-list 'completion-category-overrides
                '(fzf-async-file (styles fzf-async)))
 
+  ;; fzf-async-buffer is the analogous shadow-category for the buffer command
+  ;; (`fzf-async-buffer'), so we can pull in marginalia's buffer annotator and
+  ;; embark's buffer keymap without letting any style configured for the global
+  ;; `buffer' category re-score our pre-scored candidates.
+  (add-to-list 'completion-category-overrides
+               '(fzf-async-buffer (styles fzf-async)))
+
   (dolist (command fzf-async--commands)
     (advice-add command :before #'fzf-async--check-completion-setup)
     (with-eval-after-load 'embark
       (add-to-list 'embark-keymap-alist
                    `(,command . embark-file-map))))
 
+  (with-eval-after-load 'embark
+    (add-to-list 'embark-keymap-alist
+                 '(fzf-async-buffer . embark-buffer-map)))
+
   (with-eval-after-load 'marginalia
     ;; Register the file annotator for fzf-async-file so file commands still
     ;; show size/date without handing control to the `file' completion styles.
     (add-to-list 'marginalia-annotators
                  '(fzf-async-file marginalia-annotate-file none))
+    (add-to-list 'marginalia-annotators
+                 '(fzf-async-buffer marginalia-annotate-buffer none))
     (dolist (command fzf-async--commands)
       (add-to-list 'marginalia-command-categories
                    `(,command . ,(if (memq command fzf-async-file-commands)
