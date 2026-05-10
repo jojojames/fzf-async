@@ -196,6 +196,14 @@ function   Call the function with no arguments;
                  (function :tag "Custom function"))
   :group 'fzf-async)
 
+(defcustom fzf-async-spotlight-audio-directories
+  '("~/Music" "~/Downloads" "~/Desktop")
+  "Directories searched by `fzf-async-spotlight-audio'.
+Each directory is passed to `mdfind -onlyin'; results are concatenated.
+Set to nil to search the whole index."
+  :type '(repeat directory)
+  :group 'fzf-async)
+
 ;;; Completion style
 
 (defun fzf-async-try-completion (string _table _pred _point)
@@ -786,13 +794,24 @@ Opens the selection with `open'."
 
 ;;;###autoload
 (defun fzf-async-spotlight-audio ()
-  "Find audio and play it using Spotlight."
+  "Find audio and play it using Spotlight.
+Constrained to `fzf-async-spotlight-audio-directories'."
   (interactive)
-  (when-let* ((result (fzf-async-completing-read
-                       :prompt "spotlight: "
-                       :command
-                       "mdfind 'kMDItemContentTypeTree == \"public.audio\"'")))
-    (start-process "default-app" nil "open" result)))
+  (let* ((query "'kMDItemContentTypeTree == \"public.audio\"'")
+         (command
+          (if fzf-async-spotlight-audio-directories
+              (mapconcat
+               (lambda (dir)
+                 (format "mdfind -onlyin %s %s"
+                         (shell-quote-argument (expand-file-name dir))
+                         query))
+               fzf-async-spotlight-audio-directories
+               "; ")
+            (concat "mdfind " query))))
+    (when-let* ((result (fzf-async-completing-read
+                         :prompt "spotlight: "
+                         :command command)))
+      (start-process "default-app" nil "open" result))))
 
 ;;;###autoload
 (defun fzf-async-tramp ()
