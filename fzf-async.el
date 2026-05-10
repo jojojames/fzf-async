@@ -123,18 +123,22 @@ run of matched bytes via fzf_get_positions."
                  (integer :tag "Top N candidates"))
   :group 'fzf-async)
 
-(defcustom fzf-async-max-line-length t
+(defcustom fzf-async-max-line-length 256
   "Maximum character length of a candidate line.
-nil              — no limit (current behavior).
-t                — apply a built-in default of 512 characters.
-a positive N     — exclude lines longer than N characters.
-a negative -N    — include but truncate lines to N characters.
+nil           — no limit.
+positive N    — exclude lines longer than N characters.
+negative -N   — include but truncate lines to N characters.
 
 Applies at read time: lines from the subprocess are filtered or
 truncated before entering the candidate pool, so scoring never
-sees the excess characters."
+sees the excess characters.
+
+For the rg / ag / ugrep grep-style commands the cap is also pushed
+upstream into the search tool itself (via `--max-columns' / `--width'),
+so long lines never traverse the pipe in the first place — saves
+IPC bandwidth and avoids work in the search tool on minified files,
+base64 blobs, and other pathological inputs."
   :type '(choice (const   :tag "No limit" nil)
-                 (const   :tag "Default (512)" t)
                  (integer :tag "N (positive = exclude, negative = truncate)"))
   :group 'fzf-async)
 
@@ -529,6 +533,23 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
 
 ;;; Commands
 
+(defun fzf-async--max-columns-flag (tool)
+  "Return a max-line-length CLI flag string for grep-style TOOL.
+
+Note: rg/ugrep `--max-columns' DROP the line; ag's `--width'
+TRUNCATES display.  Practical effect for our use case is similar
+(bounded line length into our pipe), but the underlying semantics
+differ slightly.  Either way the reader-side cap still runs as a
+backstop."
+  (let ((mll fzf-async-max-line-length))
+    (if (not (and (integerp mll) (> mll 0)))
+        ""                                ; nil / 0 / negative → no flag
+      (pcase tool
+        ('rg    (format "--max-columns=%d" mll))
+        ('ugrep (format "--max-columns=%d" mll))
+        ('ag    (format "--width=%d" mll))
+        (_      "")))))
+
 ;;;###autoload
 (defun fzf-async-find ()
   "Find a file under `default-directory' using find."
@@ -571,7 +592,8 @@ Streams all file contents as FILE:LINE:CONTENT; type to
 Selecting a candidate opens the file at that line."
   (interactive)
   (when-let* ((r (fzf-async-completing-read
-                  :command "rg --line-number --no-heading --with-filename ''"
+                  :command (format "rg --line-number --no-heading --with-filename %s ''"
+                                   (fzf-async--max-columns-flag 'rg))
                   :group #'fzf-async--grep-group))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
@@ -588,7 +610,8 @@ Streams all file contents as FILE:LINE:CONTENT; type to
 Selecting a candidate opens the file at that line."
   (interactive)
   (when-let* ((r (fzf-async-completing-read
-                  :command "ag --nocolor --nogroup --line-number \".\""
+                  :command (format "ag --nocolor --nogroup --line-number %s \".\""
+                                   (fzf-async--max-columns-flag 'ag))
                   :group #'fzf-async--grep-group))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
@@ -658,7 +681,8 @@ Streams all file contents as FILE:LINE:CONTENT; type to
 Selecting a candidate opens the file at that line."
   (interactive)
   (when-let* ((r (fzf-async-completing-read
-                  :command "ugrep -RIn --no-heading ''"
+                  :command (format "ugrep -RIn --no-heading %s ''"
+                                   (fzf-async--max-columns-flag 'ugrep))
                   :group #'fzf-async--grep-group))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
