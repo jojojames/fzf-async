@@ -1,6 +1,8 @@
 #+TITLE: fzf-async
 #+STARTUP: noindent
 
+[[https://github.com/jojojames/fzf-async/actions/workflows/test.yaml][https://github.com/jojojames/fzf-async/actions/workflows/test.yaml/badge.svg]]
+
 [[./screenshots/fzf-async.png]]
 [[./screenshots/demo.gif]]
 
