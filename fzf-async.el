@@ -134,6 +134,22 @@ sees the excess characters."
                  (integer :tag "N (positive = exclude, negative = truncate)"))
   :group 'fzf-async)
 
+(defcustom fzf-async-cache-size 40
+  "Maximum number of scored snapshots cached per async session.
+Each entry stores the top-K results and the full matched-candidate
+index for one query, enabling exact-fresh hits (skip scoring) and
+prefix-refinement hits (rescore only previously-matched candidates
+plus deltas) without re-scanning the full pool.
+
+A larger value keeps a longer typing trail in cache, which improves
+backspace coverage — backspacing past N keystrokes will still hit
+the LRU as long as those intermediate queries weren't evicted by
+unrelated lookups.
+
+Read at session start; changing it does not affect running sessions."
+  :type 'integer
+  :group 'fzf-async)
+
 (defvar fzf-async-directory nil
   "Per-call directory override for fzf-async commands.
 When non-nil, supersedes `fzf-async-project-backend' and `default-directory'.

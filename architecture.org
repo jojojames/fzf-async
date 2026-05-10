@@ -104,6 +104,32 @@ For the C-side mechanics — what =score_abort= does, how the same-
 filter rule prevents livelock, how the arena handles teardown — see
 =fzf-native/architecture.org=.
 
+** Result cache (C-side)
+
+Each session maintains an LRU result cache keyed by query string.  Its
+size is configurable via =fzf-async-cache-size= (default 40, read at
+session start).  Each entry stores the top-K results delivered to Elisp
+plus the *full* matched-candidate index for that query.
+
+On every dispatch, the C side classifies the lookup:
+
+| Outcome     | When                                          | Effect                                          |
+|-------------+-----------------------------------------------+-------------------------------------------------|
+| Exact-fresh | Same query, pool unchanged                    | Return cached top-K; no scoring scheduled.      |
+| Exact-stale | Same query, pool has grown since last score   | Return cached top-K; refine on m_idx + delta.   |
+| Prefix      | New query is a refinement of a cached one     | Return prefix's top-K; refine on prior m_idx.   |
+| Miss        | No usable cache entry                         | Return current score_results; full pool scan.   |
+
+The prefix path is what makes incremental typing fast: typing =foo=
+after =fo= rescores only the candidates that matched =fo=, not the
+full pool.  Subsumption uses both byte-prefix and parsed-term-set
+comparison (catches non-prefix AND-term additions and term reorders).
+OR queries (containing =|=) never participate.
+
+For LRU details, =SharedIdx= refcounting, the subsumption rule, and
+the parsed-pattern caching, see =fzf-native/architecture.org= §
+"Result cache".
+
 * Sync pipeline — =fzf-sync-completing-read=
 
 When the candidate list is already an in-memory Elisp list (e.g. SSH

@@ -336,6 +336,7 @@ buffer live as candidates stream in.
 | ~fzf-async-project-backend~    | ~project~ | How to resolve the root directory (see note below).   |
 | ~fzf-async-highlight~          | 200       | C-side match highlighting; nil/t/N (see note below).  |
 | ~fzf-async-max-line-length~    | ~t~       | Per-line character limit; nil/t/+N/-N (see note below). |
+| ~fzf-async-cache-size~         | 40        | Per-session LRU cache entries (see note below).       |
 
 ~fzf-async-highlight~ controls C-side match highlighting.  After the scoring
 pass, the C module calls ~fzf_get_positions~ for the top N candidates and
@@ -387,6 +388,30 @@ sorts *all* candidates: every matching string is passed through the fzf
 scoring threads, the full scored set is counting-sorted, and then only the
 top N are handed back to Elisp.  The ~[FILTERED]~ count in the prompt
 always reflects the true number of matches, not the capped return value.
+
+~fzf-async-cache-size~ controls a per-session LRU result cache inside the
+C module.  Each entry stores the top-K results and the full matched-
+candidate index for one query.  Three lookup outcomes:
+
+| Outcome     | When                                                | Effect                                          |
+|-------------+-----------------------------------------------------+-------------------------------------------------|
+| Exact-fresh | Same query, pool unchanged                          | Return cached results; no scoring scheduled.    |
+| Exact-stale | Same query, more candidates streamed in since       | Return cached top-K immediately, refine in BG.  |
+| Prefix      | New query is a refinement of a cached one           | Return prefix's top-K, refine on prior matches. |
+
+Refinement scoring scans only the prior match set + delta candidates
+instead of the full pool — for typing past the first 2-3 chars this
+typically drops scan size by 100-1000×.  Subsumption uses both
+byte-prefix matching (~fo~ → ~foo~, ~fo~ → ~fo bar~) and term-set
+comparison (~fo~ → ~x fo~, ~fo bar~ → ~bar foo~).  OR queries
+(containing ~|~) are excluded — adding an OR alternate widens the
+match set unpredictably.
+
+A larger cache keeps a longer typing trail in LRU.  Helps backspace:
+backing up several keystrokes still hits cached entries as long as
+those intermediate queries weren't evicted by unrelated lookups.
+
+Read once at session start; changing it does not affect running sessions.
 
 This is done because anything interfacing with Emacs itself is easily the
 slowest part of the algorithm. Even converting C strings to Emacs strings
