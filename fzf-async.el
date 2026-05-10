@@ -544,17 +544,17 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
 (defun fzf-async--max-columns-flag (tool)
   "Return a max-line-length CLI flag string for grep-style TOOL.
 
-Note: rg/ugrep `--max-columns' DROP the line; ag's `--width'
-TRUNCATES display.  Practical effect for our use case is similar
-(bounded line length into our pipe), but the underlying semantics
-differ slightly.  Either way the reader-side cap still runs as a
-backstop."
+Note: rg's `--max-columns' DROPS the line; ag's and ugrep's
+`--width' TRUNCATE display.  Practical effect for our use case
+is similar (bounded line length into our pipe), but the
+underlying semantics differ slightly.  Either way the
+reader-side cap still runs as a backstop."
   (let ((mll fzf-async-max-line-length))
     (if (not (and (integerp mll) (> mll 0)))
         ""                                ; nil / 0 / negative → no flag
       (pcase tool
         ('rg    (format "--max-columns=%d" mll))
-        ('ugrep (format "--max-columns=%d" mll))
+        ('ugrep (format "--width=%d" mll))
         ('ag    (format "--width=%d" mll))
         (_      "")))))
 
