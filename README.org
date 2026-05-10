@@ -337,8 +337,9 @@ buffer live as candidates stream in.
 | ~fzf-async-directory~          | ~nil~     | Per-call directory override; supersedes project backend (see note below). |
 | ~fzf-async-project-backend~    | ~project~ | How to resolve the root directory (see note below).   |
 | ~fzf-async-highlight~          | 200       | C-side match highlighting; nil/t/N (see note below).  |
-| ~fzf-async-max-line-length~    | ~t~       | Per-line character limit; nil/t/+N/-N (see note below). |
+| ~fzf-async-max-line-length~    | 256       | Per-line character limit; nil/+N/-N (see note below). |
 | ~fzf-async-cache-size~         | 40        | Per-session LRU cache entries (see note below).       |
+| ~fzf-async-case-mode~          | ~smart~   | Case sensitivity: ~smart~ / ~ignore~ / ~respect~.     |
 
 ~fzf-async-highlight~ controls C-side match highlighting.  After the scoring
 pass, the C module calls ~fzf_get_positions~ for the top N candidates and
@@ -371,15 +372,14 @@ pathologically long lines slow scoring and produce unreadable candidates.
 | Value  | Behavior                                               |
 |--------+--------------------------------------------------------|
 | ~nil~  | No limit — every line is accepted unchanged.           |
-| ~t~    | Apply a built-in default of 512 characters (default). |
-| ~+N~   | Exclude lines longer than N characters.                |
+| ~+N~   | Exclude lines longer than N characters (default 256).  |
 | ~-N~   | Include but truncate to N characters.                  |
 
 The check fires in the reader thread immediately after ANSI stripping, before
 any allocation, so oversized lines never reach the scoring path.
 
 #+begin_src emacs-lisp :tangle yes
-  (setq fzf-async-max-line-length t)     ; exclude lines > 512 chars
+  (setq fzf-async-max-line-length nil)   ; no limit
   (setq fzf-async-max-line-length 300)   ; exclude lines > 300 chars
   (setq fzf-async-max-line-length -300)  ; truncate to 300 chars, keep all
 #+end_src
@@ -420,6 +420,21 @@ slowest part of the algorithm. Even converting C strings to Emacs strings
 can be a burden when the total collection size is millions of candidates.
 In practice, the cap should not be an issue (and is configurable anyways)
 since it's returning the top N candidates at any one time.
+
+~fzf-async-case-mode~ controls how the fzf scorer treats letter case.
+Read on every scoring call; changes take effect immediately.
+
+| Value      | Behavior                                                          |
+|------------+-------------------------------------------------------------------|
+| ~smart~    | Case-insensitive when the query is all lowercase; case-sensitive once it contains any uppercase character (fzf's default). |
+| ~ignore~   | Always case-insensitive.                                         |
+| ~respect~  | Always case-sensitive.                                           |
+
+#+begin_src emacs-lisp :tangle yes
+  (setq fzf-async-case-mode 'smart)    ; default
+  (setq fzf-async-case-mode 'ignore)
+  (setq fzf-async-case-mode 'respect)
+#+end_src
 
 ~fzf-async-directory~ is a ~let~-bindable override that takes priority over
 project detection.  Use it when extending a built-in command that you want
