@@ -220,6 +220,43 @@ directory list is passed as arguments to a single shell command.
 | ~fzf-async-find-hungry~   | fd / find  | Files under all derived directories    |
 | ~fzf-async-swiper-hungry~ | rg / grep  | Line content under all derived dirs    |
 
+** Multi-source
+
+| ~fzf-async~                 | ~consult~        |
+|-----------------------------+------------------|
+| ~fzf-async-find-any~   | ~consult-buffer~ |
+
+~fzf-async-find-any~ merges several sources into a single
+~completing-read~ (groups for buffers, recent files, hungry-find, …),
+ranks each group by its top fzf score, and dispatches the chosen
+candidate back to the originating command's action.
+
+The command list lives in ~fzf-async-find-any-commands~ — by default
+~(fzf-async-buffer fzf-async-recent-file fzf-async-find-hungry)~.  Add
+any other arg-less ~fzf-async~ command to that list and it shows up as
+its own group, with no source plist or factory function to maintain:
+the source is *derived from the command's existing definition* via the
+=:extract= / =:inject= dispatch in ~fzf-async-completing-read~ and
+~fzf-sync-completing-read~ (see ~architecture.org~ for the full flow).
+
+#+begin_src emacs-lisp :tangle yes
+  (setq fzf-async-find-any-commands
+        '(fzf-async-buffer
+          fzf-async-recent-file
+          fzf-async-find-hungry
+          fzf-async-spotlight-apps))
+#+end_src
+
+For ad-hoc combinations, call ~fzf-async-multi-from-commands~ directly:
+
+#+begin_src emacs-lisp :tangle yes
+  (defun my/fzf-async-files-only ()
+    (interactive)
+    (fzf-async-multi-from-commands
+     '(fzf-async-recent-file fzf-async-find-hungry fzf-async-locate)
+     :prompt "files: "))
+#+end_src
+
 * Completion style compatibility
 
 ~fzf-async~ registers and uses its own ~completion-style~ named ~fzf-async~.

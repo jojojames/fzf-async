@@ -173,6 +173,13 @@ Read at session start; changing it does not affect running sessions."
   :type 'integer
   :group 'fzf-async)
 
+(defvar fzf-async--multi-mode nil
+  "Dispatch flag for `fzf-async-completing-read' / `fzf-sync-completing-read'.
+- `:extract'         — throw `fzf-async-extracted' with the call's keyword args.
+- (`:inject' . CAND) — return CAND directly without prompting.
+Bound by `fzf-async-multi-from-commands' to derive multi-source sources from
+existing single-source commands without modifying their definitions.")
+
 (defvar fzf-async-directory nil
   "Per-call directory override for fzf-async commands.
 When non-nil, supersedes `fzf-async-project-backend' and `default-directory'.
@@ -240,6 +247,15 @@ via the `ivy-push' closure in `fzf-async-completing-read': calling
         (vertico--exhibit))
        ((bound-and-true-p icomplete-mode)
         (icomplete-exhibit))))))
+
+(defun fzf-async--commas (n)
+  "Format integer N with comma thousand-separators (e.g., 1234567 → \"1,234,567\")."
+  (let ((s (number-to-string n))
+        (out ""))
+    (while (> (length s) 3)
+      (setq out (concat "," (substring s -3) out)
+            s   (substring s 0 -3)))
+    (concat s out)))
 
 ;;; Completing-read
 
@@ -337,6 +353,14 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
   (let ((prompt (or prompt
                     (when command
                       (concat (car (split-string command nil t)) ": ")))))
+    (cond
+     ((eq fzf-async--multi-mode :extract)
+      (throw 'fzf-async-extracted
+             (list :prompt prompt :command command
+                   :directory directory :group group)))
+     ((eq (car-safe fzf-async--multi-mode) :inject)
+      (cl-return-from fzf-async-completing-read
+        (cdr fzf-async--multi-mode))))
     (when (bound-and-true-p helm-mode)
       (cl-return-from fzf-async-completing-read
         (fzf-async--helm-completing-read
@@ -365,12 +389,14 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
                                     last-filtered last-total)
                     (overlay-put stats-overlay 'display
                                  (if idx
-                                     (format "%s%s %d/[%d](%d) "
+                                     (format "%s%s %d/[%s](%s) "
                                              prompt dir (1+ idx)
-                                             last-filtered last-total)
-                                   (format "%s%s [%d](%d) "
+                                             (fzf-async--commas last-filtered)
+                                             (fzf-async--commas last-total))
+                                   (format "%s%s [%s](%s) "
                                            prompt dir
-                                           last-filtered last-total))))))))
+                                           (fzf-async--commas last-filtered)
+                                           (fzf-async--commas last-total)))))))))
            ;; Ivy push path: score the current query and push into ivy--all-candidates
            ;; directly.  Used instead of fzf-async--frontend-exhibit for ivy because
            ;; ivy does not re-call the collection lambda on timer ticks.
@@ -427,10 +453,14 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
                      (lambda ()
                        (let ((idx (fzf-async--frontend-index)))
                          (if idx
-                             (format "%s %d/[%d](%d) "
-                                     dir (1+ idx) last-filtered last-total)
-                           (format "%s [%d](%d) "
-                                   dir last-filtered last-total)))))))
+                             (format "%s %d/[%s](%s) "
+                                     dir (1+ idx)
+                                     (fzf-async--commas last-filtered)
+                                     (fzf-async--commas last-total))
+                           (format "%s [%s](%s) "
+                                   dir
+                                   (fzf-async--commas last-filtered)
+                                   (fzf-async--commas last-total))))))))
               (completing-read
                prompt
                (lambda (str _pred action)
@@ -514,6 +544,15 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
             TRANSFORM is nil return the group name; when non-nil return
             the display string for CANDIDATE within its group.  Frontends
             like vertico render group headers between sections."
+  (cond
+   ((eq fzf-async--multi-mode :extract)
+    (throw 'fzf-async-extracted
+           ;; Translate :candidates → :items so multi consumes one key.
+           (list :items candidates :prompt prompt :category category
+                 :annotate annotate :affix affix :group group)))
+   ((eq (car-safe fzf-async--multi-mode) :inject)
+    (cl-return-from fzf-sync-completing-read
+      (cdr fzf-async--multi-mode))))
   (completing-read
    prompt
    (lambda (str _pred action)
@@ -538,6 +577,345 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
                (fzf-async--bridge-defcustoms
                 #'fzf-native-score-all candidates query))))))
    nil t nil nil nil))
+
+;;; Multi-source
+
+(defvar fzf-async-find-any-commands
+  '(fzf-async-buffer
+    fzf-async-recent-file
+    fzf-async-find-hungry
+    fzf-async-swiper-hungry)
+  "Commands shown by `fzf-async-find-any'.
+Each is a command symbol whose body calls `fzf-async-completing-read' or
+`fzf-sync-completing-read'.  The source is derived automatically; see
+`fzf-async-multi-from-commands'.")
+
+(defun fzf-async--multi-tag (cand idx hash)
+  "Tag CAND with source IDX (text-prop + HASH lookup table); return CAND."
+  (when (> (length cand) 0)
+    (put-text-property 0 1 'fzf-async-src-idx idx cand))
+  (puthash cand idx hash)
+  cand)
+
+(defun fzf-async--multi-source-of (cand sources-v hash)
+  "Return the source plist responsible for CAND, or nil."
+  (and (stringp cand) (> (length cand) 0)
+       (let ((idx (or (get-text-property 0 'fzf-async-src-idx cand)
+                      (gethash cand hash))))
+         (and idx (aref sources-v idx)))))
+
+(defun fzf-async--multi-rank (results query async-p)
+  "Top fzf score for RESULTS under QUERY.
+For async sources (ASYNC-P non-nil) the C async path does not attach
+`completion-score' text properties, so we re-score the top candidate
+once via `fzf-native-score'.  For sync sources the score is read off
+the property set by `fzf-native-score-all'.  Returns 0 on empty input."
+  (cond
+   ((or (null results) (string-empty-p query)) 0)
+   (async-p
+    (or (car (fzf-async--bridge-defcustoms
+              #'fzf-native-score (car results) query))
+        0))
+   (t (or (get-text-property 0 'completion-score (car results)) 0))))
+
+;;;###autoload
+(cl-defun fzf-async-multi (sources &key (prompt "fzf-multi: "))
+  "Run completing-read across multiple SOURCES, fzf-async style.
+
+SOURCES is a list of plists.  Each source contributes a labeled group of
+candidates; group order is recomputed on every keystroke from each
+group's top fzf score, so the strongest-matching group floats to the
+top.  Within a group, candidates stay in fzf order.  An empty query
+falls back to declared source order.
+
+Per-source plist keys:
+  :name      Group header (required).
+  :items     Sync items: list of strings, or zero-arg function returning one.
+             Mutually exclusive with :command.
+  :command   Async source: shell command string.
+  :directory Working directory for :command (default `default-directory').
+  :annotate  Optional (cand) -> string annotation function.
+  :action    Optional (cand) -> any.  Called with the selection.  When
+             omitted, the raw selection string is returned."
+  (when (bound-and-true-p helm-mode)
+    (user-error "fzf-async-multi does not yet support helm-mode"))
+  (let* ((n            (length sources))
+         (sources-v    (vconcat sources))
+         (handles      (make-vector n nil))
+         (sync-items   (make-vector n nil))
+         (last-results (make-vector n nil))
+         (rank         (make-vector n 0))
+         (totals       (make-vector n 0))
+         (filtered     (make-vector n 0))
+         (last-gen     (make-vector n -1))
+         (limit        (and fzf-async-max-candidates
+                            (> fzf-async-max-candidates 0)
+                            fzf-async-max-candidates))
+         (cand->src    (make-hash-table :test 'equal :size 1024))
+         (last-exhibit 0.0)
+         (stats-overlay nil)
+         ;; Captured by `minibuffer-exit-hook' from the propertized text
+         ;; in the minibuffer before `completing-read' returns and strips
+         ;; properties.  Reliable per-instance source dispatch even when
+         ;; the same string appears in multiple sources.
+         (selected-idx nil)
+         (refresh-overlay
+          (lambda ()
+            (when (and stats-overlay (active-minibuffer-window))
+              (with-selected-window (active-minibuffer-window)
+                (let* ((idx (fzf-async--frontend-index))
+                       (f   (fzf-async--commas
+                             (cl-loop for x across filtered sum x)))
+                       (tot (fzf-async--commas
+                             (cl-loop for x across totals sum x)))
+                       (text (if idx
+                                 (format "%s%d/[%s](%s) "
+                                         prompt (1+ idx) f tot)
+                               (format "%s[%s](%s) "
+                                       prompt f tot))))
+                  (overlay-put stats-overlay 'display text))))))
+         retry-timer timer result)
+    (dotimes (i n)
+      (let* ((src   (aref sources-v i))
+             (cmd   (plist-get src :command))
+             (items (plist-get src :items)))
+        (cond
+         (cmd
+          (aset handles i
+                (fzf-native-async-start
+                 cmd
+                 (expand-file-name
+                  (or (plist-get src :directory) default-directory)))))
+         (items
+          (let ((tagged
+                 (mapcar (lambda (s)
+                           (fzf-async--multi-tag (copy-sequence s) i cand->src))
+                         (if (functionp items) (funcall items) items))))
+            (aset sync-items i tagged)
+            (aset totals i (length tagged))
+            (aset filtered i (length tagged)))))))
+    (unwind-protect
+        (progn
+          (setq timer
+                (run-with-timer
+                 0 fzf-async-refresh-delay
+                 (lambda ()
+                   (when (active-minibuffer-window)
+                     (let (bumped)
+                       (dotimes (i n)
+                         (when-let* ((h (aref handles i))
+                                     (g (fzf-native-async-generation h)))
+                           (when (/= g (aref last-gen i))
+                             (aset last-gen i g)
+                             (setq bumped t))))
+                       (when (and bumped (not (input-pending-p))
+                                  (>= (- (float-time) last-exhibit)
+                                      fzf-async-input-throttle))
+                         (setq last-exhibit (float-time))
+                         (run-with-idle-timer
+                          0 nil #'fzf-async--frontend-exhibit)))))))
+          (add-hook 'post-command-hook refresh-overlay)
+          (sit-for fzf-async-refresh-delay)
+          (setq result
+                (minibuffer-with-setup-hook
+                    (lambda ()
+                      (when (boundp 'vertico-count-format)
+                        (setq-local vertico-count-format nil))
+                      (when (boundp 'icomplete-matches-format)
+                        (setq-local icomplete-matches-format nil))
+                      ;; Capture source idx from the propertized minibuffer
+                      ;; text before completing-read returns and strips text
+                      ;; properties from its return value.  Reliable
+                      ;; per-instance dispatch even for cross-source
+                      ;; duplicate strings.
+                      (add-hook 'minibuffer-exit-hook
+                                (lambda ()
+                                  (let ((s (buffer-substring
+                                            (minibuffer-prompt-end)
+                                            (point-max))))
+                                    (when (> (length s) 0)
+                                      (setq selected-idx
+                                            (get-text-property
+                                             0 'fzf-async-src-idx s)))))
+                                nil 'local))
+                  (completing-read
+                   prompt
+                   (lambda (str _pred action)
+                     (pcase action
+                       ('metadata
+                        `(metadata
+                          (category . fzf-async-multi)
+                          (display-sort-function . identity)
+                          (cycle-sort-function . identity)
+                          (group-function
+                           . ,(lambda (cand transform)
+                                (if transform
+                                    cand
+                                  (or (plist-get
+                                       (fzf-async--multi-source-of
+                                        cand sources-v cand->src)
+                                       :name)
+                                      ""))))
+                          (affixation-function
+                           . ,(lambda (cands)
+                                (let ((maxw (apply #'max 0
+                                                   (mapcar #'string-width
+                                                           cands))))
+                                  (mapcar
+                                   (lambda (cand)
+                                     (let* ((src (fzf-async--multi-source-of
+                                                  cand sources-v cand->src))
+                                            (ann (and src (plist-get src :annotate)))
+                                            (s   (and ann (funcall ann cand)))
+                                            (pad (- (1+ maxw)
+                                                    (string-width cand))))
+                                       (list cand ""
+                                             (if s
+                                                 (concat
+                                                  (make-string (max 1 pad) ?\s)
+                                                  s)
+                                               ""))))
+                                   cands))))))
+                       (`(boundaries . ,_) (cons 0 0))
+                       ('lambda t)
+                       ('t
+                        (let* ((query
+                                (if (not (string-empty-p str))
+                                    str
+                                  (or (when-let* ((win (active-minibuffer-window)))
+                                        (with-current-buffer (window-buffer win)
+                                          (minibuffer-contents-no-properties)))
+                                      "")))
+                               (interrupted nil))
+                          (dotimes (i n)
+                            (let* ((h     (aref handles i))
+                                   (items (aref sync-items i))
+                                   (out
+                                    (cond
+                                     (h (while-no-input
+                                          (fzf-native-async-candidates
+                                           h query limit)))
+                                     (items
+                                      (if (string-empty-p query)
+                                          items
+                                        (while-no-input
+                                          (fzf-async--bridge-defcustoms
+                                           #'fzf-native-score-all
+                                           items query)))))))
+                              (cond
+                               ((eq out t) (setq interrupted t))
+                               (t
+                                ;; Async returns fresh strings each call;
+                                ;; re-tag them so group/action lookup works.
+                                ;; out may be nil (zero matches) — still valid.
+                                (when h
+                                  (dolist (c out)
+                                    (fzf-async--multi-tag c i cand->src)))
+                                (aset last-results i out)
+                                (aset rank i
+                                      (fzf-async--multi-rank out query h))
+                                (cond
+                                 (h (when-let* ((s (fzf-native-async-stats h)))
+                                      (aset filtered i (car s))
+                                      (aset totals   i (cdr s))))
+                                 (t (aset filtered i (length out))))))))
+                          (when interrupted
+                            (when retry-timer (cancel-timer retry-timer))
+                            (setq retry-timer
+                                  (run-with-idle-timer
+                                   fzf-async-input-debounce nil
+                                   (lambda ()
+                                     (setq retry-timer nil)
+                                     (fzf-async--frontend-exhibit)))))
+                          (when-let* ((win (active-minibuffer-window)))
+                            (with-selected-window win
+                              (unless stats-overlay
+                                (setq stats-overlay
+                                      (make-overlay (point-min)
+                                                    (minibuffer-prompt-end))))
+                              (funcall refresh-overlay)))
+                          (let* ((order (number-sequence 0 (1- n)))
+                                 ;; `sort' is stable since Emacs 25, so equal
+                                 ;; ranks preserve declared source order.
+                                 (sorted
+                                  (if (string-empty-p query)
+                                      order
+                                    (sort order
+                                          (lambda (a b)
+                                            (> (aref rank a)
+                                               (aref rank b)))))))
+                            (apply #'append
+                                   (mapcar (lambda (i) (aref last-results i))
+                                           sorted)))))
+                       (_ t)))
+                   nil t))))
+      (when timer (cancel-timer timer))
+      (when retry-timer (cancel-timer retry-timer))
+      (remove-hook 'post-command-hook refresh-overlay)
+      (when stats-overlay (delete-overlay stats-overlay))
+      (dotimes (i n)
+        (when-let* ((h (aref handles i)))
+          (fzf-native-async-stop h))))
+    (when result
+      (let* ((src    (or (and selected-idx (aref sources-v selected-idx))
+                         (fzf-async--multi-source-of
+                          result sources-v cand->src)))
+             (action (and src (plist-get src :action))))
+        (if action (funcall action result) result)))))
+
+;;;###autoload
+(defun fzf-async-multi-from-commands (commands &rest options)
+  "Run `fzf-async-multi' over COMMANDS by extracting each command's call args.
+Each command in COMMANDS is funcalled twice per multi session — once in
+`:extract' mode (capture keyword args, abort), once in `:inject' mode after
+the user picks (so the command's post-action runs).  OPTIONS is passed to
+`fzf-async-multi'.  Commands whose body does not reach
+`fzf-async-completing-read' or `fzf-sync-completing-read' are skipped.
+Commands must be arg-less (no interactive `read-*' prompts in their body)."
+  (let ((sources
+         (mapcar
+          (lambda (cmd)
+            (let ((args (condition-case nil
+                            (catch 'fzf-async-extracted
+                              (let ((fzf-async--multi-mode :extract))
+                                (funcall cmd))
+                              nil)
+                          (error nil))))
+              (when args
+                (let* ((cat (plist-get args :category))
+                       (default-annotate
+                        (cond
+                         ((memq cat '(fzf-async-buffer buffer))
+                          (lambda (c)
+                            (when (fboundp 'marginalia-annotate-buffer)
+                              (marginalia-annotate-buffer c))))
+                         ((memq cat '(fzf-async-file file))
+                          (lambda (c)
+                            (when (fboundp 'marginalia-annotate-file)
+                              (marginalia-annotate-file c)))))))
+                  (append
+                   (list :name (replace-regexp-in-string
+                                "^fzf-async-" "" (symbol-name cmd))
+                         :annotate (or (plist-get args :annotate)
+                                       default-annotate)
+                         :action (lambda (cand)
+                                   (let ((fzf-async--multi-mode
+                                          (cons :inject cand)))
+                                     (funcall cmd))))
+                   args)))))
+          commands)))
+    (apply #'fzf-async-multi (delq nil sources) options)))
+
+;;;###autoload
+(defun fzf-async-find-any ()
+  "Multi-source fuzzy completion over `fzf-async-find-any-commands'.
+Defaults: live buffers, `recentf' files, and a hungry-find over the parent
+directories of all file-visiting buffers.  Each command's source is
+derived automatically — see `fzf-async-multi-from-commands'."
+  (interactive)
+  (fzf-async-multi-from-commands
+   fzf-async-find-any-commands
+   :prompt "any?: "))
 
 ;;; Commands
 
@@ -1135,7 +1513,8 @@ Guards against two misconfiguration patterns:
 Remove it and ensure `fzf-async-setup' has been called so it is wired \
 via `completion-category-overrides' only"))
   (unless (and (assq 'fzf-async completion-category-overrides)
-               (assq 'fzf-async-file completion-category-overrides))
+               (assq 'fzf-async-file completion-category-overrides)
+               (assq 'fzf-async-multi completion-category-overrides))
     (user-error
      "fzf-async is missing from `completion-category-overrides'.  \
 Call `fzf-async-setup' before using fzf-async commands")))
@@ -1181,6 +1560,13 @@ Call this once during init before using `fzf-async-completing-read'."
   ;; `buffer' category re-score our pre-scored candidates.
   (add-to-list 'completion-category-overrides
                '(fzf-async-buffer (styles fzf-async)))
+
+  ;; Multi-source category — without this the global completion style (e.g.
+  ;; `basic') caches our list once and prefix-filters client-side, so the table
+  ;; function never re-runs on subsequent keystrokes.  The passthrough style
+  ;; forces the table to be re-called on every input change.
+  (add-to-list 'completion-category-overrides
+               '(fzf-async-multi (styles fzf-async)))
 
   (dolist (command fzf-async--commands)
     (advice-add command :before #'fzf-async--check-completion-setup)

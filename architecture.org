@@ -158,6 +158,116 @@ re-scores the entire list synchronously. =fzf-native-score-all= is
 parallelized internally (see =fzf-native/architecture.org=), so this
 remains snappy for tens of thousands of candidates.
 
+* Multi-source — =fzf-async-multi= and =fzf-async-find-any=
+
+A multi-source command merges several "sources" (each backed by either a
+sync candidate list or an async shell command) into one
+=completing-read=, with grouped, fzf-scored results.  Top-of-group fzf
+score determines per-tick group order; ties fall back to declared source
+order via =sort='s stability.
+
+#+begin_src
+  ┌────────────────────────────────────────────────────────────────────┐
+  │ fzf-async-multi (orchestrator)                                     │
+  │   • per-source vectors: handles, sync-items, last-results,         │
+  │     rank, totals, filtered, last-gen                               │
+  │   • shared timer polls async generation counters                   │
+  │   • collection lambda's 't action:                                 │
+  │       for each source:                                             │
+  │         async → (fzf-native-async-candidates handle query limit)   │
+  │         sync  → (fzf-native-score-all items query)                 │
+  │       update last-results[i], rank[i], filtered[i]                 │
+  │       sort sources by rank (stable → declared order on tie)        │
+  │       concat last-results in sorted order                          │
+  │   • affixation-function pads candidates to a uniform column        │
+  │     before appending each source's :annotate output                │
+  │   • group-function reads source via fzf-async-src-idx text-prop    │
+  │     and returns the source :name                                   │
+  │   • on selection: source's :action is funcalled with the cand      │
+  └────────────────────────────────────────────────────────────────────┘
+#+end_src
+
+** Source derivation: extract / inject
+
+Sources are not duplicated as parallel data structures.  Every existing
+single-source command (e.g. =fzf-async-buffer=, =fzf-async-spotlight-apps=)
+is the source of truth; =fzf-async-multi-from-commands= replays each
+command twice per session to obtain a source plist:
+
+1. *Extract* — a dynamic var =fzf-async--multi-mode= is bound to
+   =:extract=, and the command is funcalled.  Inside
+   =fzf-async-completing-read= / =fzf-sync-completing-read=, the entry
+   point sees the flag and =throw='s the keyword args (=:prompt=,
+   =:command= or =:items=, =:directory=, =:category=, =:annotate=).
+   The command's =when-let*= fails to bind, post-action never runs.
+2. *Inject* — after the user picks =CAND=, =fzf-async--multi-mode= is
+   bound to =(:inject . CAND)=, and the command is funcalled again.
+   The completing-read entry point sees the flag and returns =CAND=
+   directly.  The =when-let*= binds, and the post-action (e.g.
+   =(switch-to-buffer result)=) runs.
+
+#+begin_src
+  USER: M-x fzf-async-find-any
+                │
+                ▼
+  fzf-async-find-any
+    → fzf-async-multi-from-commands
+          fzf-async-find-any-commands
+
+  PHASE 1: EXTRACT  (loop over all commands)
+    let multi-mode = :extract
+    catch 'fzf-async-extracted (funcall cmd)
+      ; inside cmd, completing-read entry sees :extract → throw args
+    builds source plist:
+      (:name "buffer"
+       :items names
+       :category fzf-async-buffer
+       :annotate <derived from category>
+       :action  λ(c). re-run cmd with (:inject . c))   ; closes over cmd
+
+  PHASE 2: MULTI UI
+    fzf-async-multi merges all sources, user picks CAND
+    looks up source via fzf-async-src-idx text-prop, calls :action
+
+  PHASE 3: INJECT  (one cmd is replayed)
+    let multi-mode = (:inject . CAND)
+    (funcall fzf-async-buffer)
+      ; inside cmd, completing-read entry returns CAND
+    when-let* binds → post-action runs
+#+end_src
+
+The cost: each command runs twice per multi session.  Setup work
+(=fzf-async-find-hungry='s buffer-list walk, etc.) repeats.
+Microseconds in practice.
+
+** Mode encoding asymmetry
+
+=fzf-async--multi-mode= is the bare symbol =:extract= for extract (no
+payload), or the cons =(:inject . CAND)= for inject (carries the
+candidate).  Hence the dispatch:
+
+#+begin_src emacs-lisp
+  (cond
+   ((eq fzf-async--multi-mode :extract) ...)        ; bare symbol
+   ((eq (car-safe fzf-async--multi-mode) :inject)   ; cons head
+    ... (cdr fzf-async--multi-mode) ...))           ; cons tail = CAND
+#+end_src
+
+** Edge cases
+
+- *Commands with =read-*= in body* (e.g. =fzf-async-shell-command=
+  prompts before reaching the completing-read call): unsupported as
+  multi sources — extract would prompt the user.
+- *Commands that =user-error= before the completing-read call* (e.g.
+  =fzf-async-find-hungry= when no file-visiting buffers exist): the
+  =catch= returns =nil= or the =user-error= propagates; the source is
+  silently skipped.
+- *Marginalia annotations*: the multi category is =fzf-async-multi= (not
+  the per-command category), so per-category marginalia registrations
+  don't apply.  =fzf-async-multi-from-commands= synthesizes a fallback
+  =:annotate= from the extracted =:category= (=buffer= →
+  =marginalia-annotate-buffer=, =file= → =marginalia-annotate-file=).
+
 * Custom completion style
 
 The completion framework wants to filter, score, and re-sort the
