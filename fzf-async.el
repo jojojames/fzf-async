@@ -1546,25 +1546,14 @@ Call this once during init before using `fzf-async-completing-read'."
   (advice-add 'fzf-native-async-start      :around #'fzf-async--bridge-defcustoms)
   (advice-add 'fzf-native-async-candidates :around #'fzf-async--bridge-defcustoms)
 
-  ;; fzf-async-file uses the same passthrough style as fzf-async, but lets
-  ;; Marginalia annotate candidates with file metadata (size, date).  It must
-  ;; NOT use the built-in `file' category: Marginalia would then override the
-  ;; completion category to `file', causing any style configured for `file'
-  ;; (e.g. fussy) to re-score the async candidates via fzf-native-score-all.
+  ;; Shadow categories for `file' / `buffer' / multi: keep marginalia +
+  ;; embark integration but force the passthrough style so other styles
+  ;; (e.g. fussy on `file', `basic' on multi) don't re-filter our
+  ;; pre-scored candidates or cache them client-side past the first call.
   (add-to-list 'completion-category-overrides
                '(fzf-async-file (styles fzf-async)))
-
-  ;; fzf-async-buffer is the analogous shadow-category for the buffer command
-  ;; (`fzf-async-buffer'), so we can pull in marginalia's buffer annotator and
-  ;; embark's buffer keymap without letting any style configured for the global
-  ;; `buffer' category re-score our pre-scored candidates.
   (add-to-list 'completion-category-overrides
                '(fzf-async-buffer (styles fzf-async)))
-
-  ;; Multi-source category — without this the global completion style (e.g.
-  ;; `basic') caches our list once and prefix-filters client-side, so the table
-  ;; function never re-runs on subsequent keystrokes.  The passthrough style
-  ;; forces the table to be re-called on every input change.
   (add-to-list 'completion-category-overrides
                '(fzf-async-multi (styles fzf-async)))
 
