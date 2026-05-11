@@ -104,7 +104,7 @@ Main Repo:
     (fzf-native-load-dyn))
 #+end_src
 
-Fork: (Might have to use this for now.)
+Fork: (Use this one if you run into errors as upstream may lag a few days.)
 
 #+begin_src emacs-lisp :tangle yes
   (use-package fzf-native
@@ -154,15 +154,18 @@ experience using ~fzf~ as the core filtering/scoring algorithm.
   (fzf-async-setup)
 
   ;; Then call any command:
-  (fzf-async-git-ls-files)
+  (fzf-async-find-any)
   (fzf-async-rg)
   (fzf-async-fd)
   (fzf-async-find)
+  (fzf-async-git-ls-files)
 #+end_src
 
 * Commands
 
 All commands open the selected candidate in Emacs.
+
+The list here is on best efforts, might be inaccurate.
 
 ** File finders
 
@@ -320,20 +323,15 @@ each input change.
 
 | Frontend      | Status    | Notes                                                          |
 |---------------+-----------+----------------------------------------------------------------|
-| ~vertico~     | Full      | Recommended.  Generation-based refresh via ~vertico--exhibit~. |
-| ~icomplete~   | Full      | Refreshes via ~icomplete-exhibit~.                             |
-| ~fido~        | Full      | Built on ~icomplete~; works without extra configuration.       |
+| ~vertico~     | Supported | Recommended.  Generation-based refresh via ~vertico--exhibit~. |
+| ~icomplete~   | Supported | Refreshes via ~icomplete-exhibit~.                             |
+| ~fido~        | Supported | Built on ~icomplete~; works without extra configuration.       |
 | ~ivy/counsel~ | Supported | Push model via ~ivy--set-candidates~. See below.               |
 | ~helm~        | Supported | Dedicated source path; auto-dispatched when ~helm-mode~ is active. See below. |
 
 Caveat: I mostly use ~vertico~ these days so wasn't exhaustive with using the
 other completion systems.
-** transient
-A [[https://github.com/jojojames/matcha/blob/master/matcha-fzf-async.el][matcha transient]] is
- defined for invoking all ~fzf-async~ commands from a
-single keybinding via [[https://github.com/jojojames/matcha][matcha]].
 ** ivy / counsel
-
 Ivy uses a *push model*: the completion UI holds its own internal candidate
 list (~ivy--all-candidates~) and does not re-call the collection function
 on each display refresh.  This conflicts with ~fzf-async~'s pull model,
@@ -345,9 +343,7 @@ calls ~fzf-native-async-candidates~ directly, pushes the results via
 used by counsel's async commands.  The stats prompt (directory, selection
 index, filtered/total counts) is delivered via ~ivy-pre-prompt-function~,
 which ivy prepends to the prompt string on each redraw.
-
 ** helm
-
 When ~helm-mode~ is active, ~fzf-async-completing-read~ automatically
 dispatches to a dedicated ~fzf-async--helm-completing-read~ path — no
 extra configuration is needed.
@@ -362,7 +358,10 @@ A polling timer checks ~fzf-native-async-generation~ at
 ~fzf-async-refresh-delay~ intervals and calls ~helm-force-update~ whenever
 the background scoring thread has produced new results, keeping the helm
 buffer live as candidates stream in.
-
+** transient
+A [[https://github.com/jojojames/matcha/blob/master/matcha-fzf-async.el][matcha transient]] is
+ defined for invoking all ~fzf-async~ commands from a
+single keybinding via [[https://github.com/jojojames/matcha][matcha]].
 * Customization
 
 | Variable                       | Default   | Description                                            |
@@ -405,6 +404,7 @@ Setting a cap rather than always highlighting all candidates is intentional:
 ~fzf-async-max-line-length~ filters lines from the subprocess before they
 enter the candidate pool.  Minified JavaScript, base64 payloads, and other
 pathologically long lines slow scoring and produce unreadable candidates.
+Lowering this number can be a huge performance improvement.
 
 | Value  | Behavior                                               |
 |--------+--------------------------------------------------------|
@@ -427,6 +427,7 @@ sorts *all* candidates: every matching string is passed through the fzf
 scoring threads, the full scored set is counting-sorted, and then only the
 top N are handed back to Elisp.  The ~[FILTERED]~ count in the prompt
 always reflects the true number of matches, not the capped return value.
+Lowering this number can be a huge performance improvement.
 
 ~fzf-async-cache-size~ controls a per-session LRU result cache inside the
 C module.  Each entry stores the top-K results and the full matched-
@@ -519,13 +520,13 @@ The prompt overlay shows live status during a search:
 ~fzf-async~ is designed to be extensible.  New commands are thin wrappers
 around ~fzf-async-completing-read~, which accepts keyword arguments:
 
-| Argument                | Default                       | Description                        |
-|-------------------------+-------------------------------+------------------------------------|
-| ~:prompt~               | first token of ~:command~ + ~": "~ | Minibuffer prompt string.    |
-| ~:command~              | —                             | Shell command whose stdout becomes candidates. |
-| ~:directory~            | ~default-directory~           | Working directory for the command. |
-| ~:group~                | ~nil~                         | ~group-function~ for candidate grouping. |
-| ~:skip-executable-check~ | ~nil~                        | Skip the built-in ~executable-find~ guard on the first token of ~:command~. |
+| Argument                 | Default                            | Description                                                                 |
+|--------------------------+------------------------------------+-----------------------------------------------------------------------------|
+| ~:prompt~                | first token of ~:command~ + ~": "~ | Minibuffer prompt string.                                                   |
+| ~:command~               | —                                  | Shell command whose stdout becomes candidates.                              |
+| ~:directory~             | ~default-directory~                | Working directory for the command.                                          |
+| ~:group~                 | ~nil~                              | ~group-function~ for candidate grouping.                                    |
+| ~:skip-executable-check~ | ~nil~                              | Skip the built-in ~executable-find~ guard on the first token of ~:command~. |
 
 The command string is passed verbatim to ~shell-file-name~ (~-c~), so pipes,
 redirections, and shell quoting all work as expected.
@@ -588,19 +589,19 @@ Opens the selected PDF with `open'."
 
 (This comparison is on best efforts, so might be inaccurate. :))
 
-In comparison to similar preexisting packages like ~Consult~/~Counsel~,
+In comparison to similar pre-existing packages like ~consult~ / ~counsel~ / ~helm~,
 ~fzf-async~ provides:
 
 *Speed.* fzf scoring runs multithreaded in C with a counting-sort final
 pass that is O(n + max_score).  Results stream incrementally so the UI
-stays responsive with *millions* of candidates.  The goal is to match or
-exceed the performance of ~fzf~ in the terminal from within Emacs.
+stays responsive with *tens of millions* of candidates.  The goal is to match
+or exceed the performance of ~fzf~ in the terminal from within Emacs.
 
 *True fuzzy matching.* A single query string is used for both filtering
 and scoring in one pass — no two-stage conflict, no mismatches between
 what the shell tool matched and what the completion framework ranked.
 
-*Simplicity.* ~fzf-async.el~ is roughly 1000 lines of Emacs Lisp, most of
+*Simplicity.* ~fzf-async.el~ is roughly 2000 lines of Emacs Lisp, most of
 which declares the built-in commands and ~fzf-native-module.c~ is also
 roughly 2000 lines.
 
@@ -608,10 +609,15 @@ roughly 2000 lines.
 ~fzf-async~ requires
 [[https://github.com/dangduc/fzf-native][fzf-native]],
 a compiled C dynamic module that requires a C compiler and CMake to build.
-If a pure-Elisp solution is preferred,
+
+If a pure-Elisp solution is preferred:
+
+[[https://github.com/abo-abo/swiper][counsel]]
+[[https://github.com/emacs-helm/helm][helm]]
 [[https://github.com/minad/consult][consult]]
-and [[https://github.com/abo-abo/swiper][counsel]] are mature, widely
-supported alternatives that require no native compilation.
+
+are mature, widely supported alternatives that require no native compilation.
+
 ** Prior Discussions
 [[https://github.com/abo-abo/swiper/pull/1151][swiper: add counsel-fzf]]
 [[https://github.com/abo-abo/swiper/issues/848][swiper: fzf integration]]
@@ -633,3 +639,7 @@ The C scoring module under ~fzf-async~ is documented separately in
 For ~fussy~, the broader fuzzy completion-style framework that
 ~fzf-async~ deliberately bypasses, see
 [[https://github.com/jojojames/fussy/blob/HEAD/architecture.org][fussy's architecture overview]].
+* Acknowledgements
+[[https://github.com/abo-abo/swiper][counsel]]
+[[https://github.com/emacs-helm/helm][helm]]
+[[https://github.com/minad/consult][consult]]
