@@ -517,7 +517,16 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
         (when retry-timer (cancel-timer retry-timer))
         (remove-hook 'post-command-hook refresh-overlay)
         (when stats-overlay (delete-overlay stats-overlay))
-        (when handle (fzf-native-async-stop handle))))))
+        ;; Defer `fzf-native-async-stop' off the synchronous unwind path.
+        ;; The C-side destroy does pthread_join on the scoring thread
+        ;; (uninterruptible snapshot/score work for huge pools) and frees
+        ;; the candidate arena — easily hundreds of ms for a `find ~'-scale
+        ;; session.  None of it is needed before minibuffer dismissal, so
+        ;; we let the user see ESC return instantly and clean up on the
+        ;; next idle tick.
+        (when handle
+          (let ((h handle))
+            (run-at-time 0 nil (lambda () (fzf-native-async-stop h)))))))))
 
 (cl-defun fzf-sync-completing-read (&key
                                     candidates
@@ -873,9 +882,18 @@ Per-source plist keys:
       (when retry-timer (cancel-timer retry-timer))
       (remove-hook 'post-command-hook refresh-overlay)
       (when stats-overlay (delete-overlay stats-overlay))
-      (dotimes (i n)
-        (when-let* ((h (aref handles i)))
-          (fzf-native-async-stop h))))
+      ;; Defer the async-stops so ESC returns instantly — see the same
+      ;; comment in `fzf-async-completing-read'.  Stops are scheduled
+      ;; together so the runtime can decide its own scheduling, and the
+      ;; closure owns the handle vector to keep it alive across the gap.
+      (let ((live nil))
+        (dotimes (i n)
+          (when-let* ((h (aref handles i)))
+            (push h live)))
+        (when live
+          (run-at-time 0 nil
+                       (lambda ()
+                         (dolist (h live) (fzf-native-async-stop h)))))))
     (when result
       (let* ((src    (or (and selected-idx (aref sources-v selected-idx))
                          (fzf-async--multi-source-of
