@@ -1308,7 +1308,6 @@ Selecting a match opens the file and jumps to the line."
                            " -Rn '' "
                            dir-args))
              (t (user-error "Neither rg nor grep found in exec-path")))))
-      (message "fzf-async-swiper-hungry: %s" command)
       (when-let* ((r (fzf-async-completing-read
                       :prompt "hungry swiper: "
                       :command command
@@ -1347,7 +1346,6 @@ by a shallower parent, then streams fd (or find) output through fzf."
                            dir-args
                            " -type f"))
              (t (user-error "Neither fd nor find found in exec-path")))))
-      (message "fzf-async-find-hungry: %s" command)
       (when-let* ((result (fzf-async-completing-read
                            :prompt "hungry find: "
                            :command command
