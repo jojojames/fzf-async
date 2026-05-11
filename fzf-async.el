@@ -1383,13 +1383,16 @@ Priority: `fzf-async-directory' >
 (defun fzf-async--deduplicate-dirs (dirs)
   "Remove duplicates and subdirectory entries from DIRS.
 If directory A is a prefix of directory B, B is dropped — A's recursive
-search already covers it."
+search already covers it.  Exception: B is kept when it is itself a git
+root (contains a .git entry), since rg honors per-repo gitignores and a
+descend from A may exclude files the user expects to search."
   (let ((unique (cl-delete-duplicates dirs :test #'string=)))
     (cl-loop for dir in unique
-             unless (cl-some (lambda (other)
-                               (and (not (string= dir other))
-                                    (string-prefix-p other dir)))
-                             unique)
+             unless (and (not (file-exists-p (expand-file-name ".git" dir)))
+                         (cl-some (lambda (other)
+                                    (and (not (string= dir other))
+                                         (string-prefix-p other dir)))
+                                  unique))
              collect dir)))
 
 (defun fzf-async--sanitize-filename (name)
