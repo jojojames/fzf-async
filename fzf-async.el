@@ -752,33 +752,50 @@ Per-source plist keys:
                           (cycle-sort-function . identity)
                           (group-function
                            . ,(lambda (cand transform)
-                                (if transform
-                                    cand
-                                  (or (plist-get
-                                       (fzf-async--multi-source-of
-                                        cand sources-v cand->src)
-                                       :name)
-                                      ""))))
+                                (let ((src (fzf-async--multi-source-of
+                                            cand sources-v cand->src)))
+                                  (if transform
+                                      ;; Per-source :group transform —
+                                      ;; lets a source strip an internal
+                                      ;; "IDX:" prefix or otherwise
+                                      ;; reshape its display string while
+                                      ;; keeping the raw value as the
+                                      ;; lookup/match key.  Falls back to
+                                      ;; the raw candidate when a source
+                                      ;; has no :group function (or its
+                                      ;; transform returns nil).
+                                      (or (when-let* ((g (plist-get src :group)))
+                                            (funcall g cand t))
+                                          cand)
+                                    (or (plist-get src :name) "")))))
                           (affixation-function
                            . ,(lambda (cands)
-                                (let ((maxw (apply #'max 0
-                                                   (mapcar #'string-width
-                                                           cands))))
-                                  (mapcar
-                                   (lambda (cand)
+                                (let* ((displays
+                                        (mapcar
+                                         (lambda (c)
+                                           (let* ((src (fzf-async--multi-source-of
+                                                        c sources-v cand->src))
+                                                  (g (and src (plist-get src :group))))
+                                             (or (and g (funcall g c t)) c)))
+                                         cands))
+                                       (maxw (apply #'max 0
+                                                    (mapcar #'string-width
+                                                            displays))))
+                                  (cl-mapcar
+                                   (lambda (cand display)
                                      (let* ((src (fzf-async--multi-source-of
                                                   cand sources-v cand->src))
                                             (ann (and src (plist-get src :annotate)))
                                             (s   (and ann (funcall ann cand)))
                                             (pad (- (1+ maxw)
-                                                    (string-width cand))))
+                                                    (string-width display))))
                                        (list cand ""
                                              (if s
                                                  (concat
                                                   (make-string (max 1 pad) ?\s)
                                                   s)
                                                ""))))
-                                   cands))))))
+                                   cands displays))))))
                        (`(boundaries . ,_) (cons 0 0))
                        ('lambda t)
                        ('t
