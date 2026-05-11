@@ -104,15 +104,6 @@ Main Repo:
     (fzf-native-load-dyn))
 #+end_src
 
-Fork: (Use this one if you run into errors as upstream may lag a few days.)
-
-#+begin_src emacs-lisp :tangle yes
-  (use-package fzf-native
-    :vc (:url "https://github.com/jojojames/fzf-native" :rev :newest)
-    :config
-    (fzf-native-load-dyn))
-#+end_src
-
 Minimal setup:
 
 #+begin_src emacs-lisp :tangle yes
