@@ -325,12 +325,24 @@ Returns the selected candidate string, or nil on cancel."
       (funcall cleanup))
     result))
 
+(defun fzf-async--maybe-expand (result directory resolve-paths)
+  "Return RESULT expanded against DIRECTORY when RESOLVE-PATHS is non-nil.
+For RESOLVE-PATHS=t the whole RESULT is passed through `expand-file-name'
+— this works for both plain paths and FILE:LINE:CONTENT grep candidates,
+since `expand-file-name' prepends DIRECTORY and leaves the suffix
+untouched.  Returns RESULT unchanged for non-strings, empty strings, or
+when RESOLVE-PATHS is nil."
+  (if (and resolve-paths (stringp result) (not (string-empty-p result)))
+      (expand-file-name result directory)
+    result))
+
 ;;;###autoload
 (cl-defun fzf-async-completing-read (&key
                                      prompt
                                      command
                                      (directory (fzf-async--default-dir))
                                      group
+                                     (resolve-paths t)
                                      skip-executable-check)
   "Run shell COMMAND and completing-read its output.
 
@@ -340,6 +352,13 @@ Returns the selected candidate string, or nil on cancel."
 :DIRECTORY              Working directory for COMMAND.  Defaults to
                         `fzf-async--default-dir' (respects
                         `fzf-async-project-backend').
+:RESOLVE-PATHS          When non-nil (the default), the returned
+                        candidate is passed through `expand-file-name'
+                        against :DIRECTORY before being handed back to the
+                        caller.  Lets file and grep commands stay agnostic
+                        of the caller's `default-directory'.  Pass nil for
+                        commands that return non-path output (e.g. shell
+                        output where the raw text matters).
 :SKIP-EXECUTABLE-CHECK  When non-nil, skip the `executable-find' guard on
                         the first token of COMMAND.
 
@@ -359,15 +378,19 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
      ((eq fzf-async--multi-mode :extract)
       (throw 'fzf-async-extracted
              (list :prompt prompt :command command
-                   :directory directory :group group)))
+                   :directory directory :group group
+                   :resolve-paths resolve-paths)))
      ((eq (car-safe fzf-async--multi-mode) :inject)
       (cl-return-from fzf-async-completing-read
-        (cdr fzf-async--multi-mode))))
+        (fzf-async--maybe-expand (cdr fzf-async--multi-mode)
+                                 directory resolve-paths))))
     (when (bound-and-true-p helm-mode)
       (cl-return-from fzf-async-completing-read
-        (fzf-async--helm-completing-read
-         :prompt prompt :command command :directory directory
-         :skip-executable-check skip-executable-check)))
+        (fzf-async--maybe-expand
+         (fzf-async--helm-completing-read
+          :prompt prompt :command command :directory directory
+          :skip-executable-check skip-executable-check)
+         directory resolve-paths)))
     (let* ((handle (fzf-native-async-start command (expand-file-name directory)))
            (dir (abbreviate-file-name directory))
            (last-gen -1)
@@ -436,7 +459,8 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
                           #'fzf-async--frontend-exhibit)))))))))
       (add-hook 'post-command-hook refresh-overlay)
       (sit-for fzf-async-refresh-delay)
-      (unwind-protect
+      (fzf-async--maybe-expand
+       (unwind-protect
           (minibuffer-with-setup-hook
               (lambda ()
                 ;; case-mode and other defcustoms are bridged onto the
@@ -526,7 +550,8 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
         ;; next idle tick.
         (when handle
           (let ((h handle))
-            (run-at-time 0 nil (lambda () (fzf-native-async-stop h)))))))))
+            (run-at-time 0 nil (lambda () (fzf-native-async-stop h))))))
+       directory resolve-paths))))
 
 (cl-defun fzf-sync-completing-read (&key
                                     candidates
@@ -1594,6 +1619,7 @@ directory; otherwise it is placed in the kill ring."
                          :prompt (format "%s » " cmd)
                          :command cmd
                          :directory dir
+                         :resolve-paths nil
                          :skip-executable-check t)))
       (let ((path (expand-file-name result dir)))
         (if (file-exists-p path)
