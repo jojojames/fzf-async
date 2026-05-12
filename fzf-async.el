@@ -179,7 +179,7 @@ Read at session start; changing it does not affect running sessions."
   "Dispatch flag for `fzf-async-completing-read' / `fzf-sync-completing-read'.
 - `:extract'         — throw `fzf-async-extracted' with the call's keyword args.
 - (`:inject' . CAND) — return CAND directly without prompting.
-Bound by `fzf-async-multi-from-commands' to derive multi-source sources from
+Bound by `fzf-async-multi-read' to derive multi-source sources from
 existing single-source commands without modifying their definitions.")
 
 (defvar fzf-async-directory nil
@@ -626,7 +626,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
   "Commands shown by `fzf-async-find-any'.
 Each is a command symbol whose body calls `fzf-async-completing-read' or
 `fzf-sync-completing-read'.  The source is derived automatically; see
-`fzf-async-multi-from-commands'.")
+`fzf-async-multi-read'.")
 
 (defun fzf-async--multi-tag (cand idx hash)
   "Tag CAND with source IDX (text-prop + HASH lookup table); return CAND."
@@ -656,9 +656,12 @@ the property set by `fzf-native-score-all'.  Returns 0 on empty input."
         0))
    (t (or (get-text-property 0 'completion-score (car results)) 0))))
 
-;;;###autoload
-(cl-defun fzf-async-multi (sources &key (prompt "fzf-multi: "))
+(cl-defun fzf-async--multi-read (sources &key (prompt "fzf-multi: "))
   "Run completing-read across multiple SOURCES, fzf-async style.
+
+Internal — users should call `fzf-async-multi-read' which derives sources
+from existing single-source commands.  This function takes pre-built
+source plists directly.
 
 SOURCES is a list of plists.  Each source contributes a labeled group of
 candidates; group order is recomputed on every keystroke from each
@@ -677,16 +680,16 @@ Per-source plist keys:
              omitted, the raw selection string is returned."
   (cond
    ;; Composability: when this multi is being extracted by an outer
-   ;; `fzf-async-multi-from-commands', throw our merged SOURCES so the
+   ;; `fzf-async-multi-read', throw our merged SOURCES so the
    ;; outer can flatten them into its own source list.  Each source
    ;; already carries its own :action closure, so dispatch from the
    ;; outer multi routes back to the correct underlying command.
    ((eq fzf-async--multi-mode :extract)
     (throw 'fzf-async-extracted (list :multi-sources sources)))
    ((eq (car-safe fzf-async--multi-mode) :inject)
-    (cl-return-from fzf-async-multi (cdr fzf-async--multi-mode))))
+    (cl-return-from fzf-async--multi-read (cdr fzf-async--multi-mode))))
   (when (bound-and-true-p helm-mode)
-    (user-error "fzf-async-multi does not yet support helm-mode"))
+    (user-error "fzf-async--multi-read does not yet support helm-mode"))
   (let* ((n            (length sources))
          (sources-v    (vconcat sources))
          (handles      (make-vector n nil))
@@ -938,18 +941,19 @@ Per-source plist keys:
         (if action (funcall action result) result)))))
 
 ;;;###autoload
-(defun fzf-async-multi-from-commands (commands &rest options)
-  "Run `fzf-async-multi' over COMMANDS by extracting each command's call args.
+(defun fzf-async-multi-read (commands &rest options)
+  "Run a multi-source completing-read over COMMANDS.
 Each command in COMMANDS is funcalled twice per multi session — once in
 `:extract' mode (capture keyword args, abort), once in `:inject' mode after
-the user picks (so the command's post-action runs).  OPTIONS is passed to
-`fzf-async-multi'.  Commands whose body does not reach
+the user picks (so the command's post-action runs).  OPTIONS is forwarded
+to `fzf-async--multi-read'.  Commands whose body does not reach
 `fzf-async-completing-read' or `fzf-sync-completing-read' are skipped.
 Commands must be arg-less (no interactive `read-*' prompts in their body).
 
-Composes: if a command in COMMANDS itself calls `fzf-async-multi' (e.g.
-`fzf-async-find-any'), its inner sources are flattened in alongside the
-other commands' sources, with each inner source keeping its own :action."
+Composes: if a command in COMMANDS itself calls `fzf-async--multi-read'
+\(e.g. `fzf-async-find-any'), its inner sources are flattened in alongside
+the other commands' sources, with each inner source keeping its own
+:action."
   (let* ((source-lists
           (mapcar
            (lambda (cmd)
@@ -990,16 +994,16 @@ other commands' sources, with each inner source keeping its own :action."
                        args)))))))
            commands))
          (sources (apply #'append (delq nil source-lists))))
-    (apply #'fzf-async-multi sources options)))
+    (apply #'fzf-async--multi-read sources options)))
 
 ;;;###autoload
 (defun fzf-async-find-any ()
   "Multi-source fuzzy completion over `fzf-async-find-any-commands'.
 Defaults: live buffers, `recentf' files, and a hungry-find over the parent
 directories of all file-visiting buffers.  Each command's source is
-derived automatically — see `fzf-async-multi-from-commands'."
+derived automatically — see `fzf-async-multi-read'."
   (interactive)
-  (fzf-async-multi-from-commands
+  (fzf-async-multi-read
    fzf-async-find-any-commands
    :prompt "any?: "))
 

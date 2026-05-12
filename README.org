@@ -241,12 +241,12 @@ the source is *derived from the command's existing definition* via the
           fzf-async-spotlight-apps))
 #+end_src
 
-For ad-hoc combinations, call ~fzf-async-multi-from-commands~ directly:
+For ad-hoc combinations, call ~fzf-async-multi-read~ directly:
 
 #+begin_src emacs-lisp :tangle yes
   (defun my/fzf-async-files-only ()
     (interactive)
-    (fzf-async-multi-from-commands
+    (fzf-async-multi-read
      '(fzf-async-recent-file fzf-async-find-hungry fzf-async-locate)
      :prompt "files: "))
 #+end_src
