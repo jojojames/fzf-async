@@ -1190,6 +1190,54 @@ Selecting a candidate opens the file at that line."
       (switch-to-buffer result))))
 
 ;;;###autoload
+(defun fzf-async-yank-pop ()
+  "Yank from `kill-ring' using fzf for selection.
+When invoked immediately after a yank command, replaces the previously
+yanked text with the selection (mirroring `yank-pop' / `consult-yank-pop')."
+  (interactive "*")
+  (unless kill-ring
+    (user-error "Kill ring is empty"))
+  (let* ((seen (make-hash-table :test 'equal))
+         (lookup (make-hash-table :test 'equal))
+         (entries
+          (cl-loop
+           for s in kill-ring
+           for clean = (substring-no-properties s)
+           unless (or (string-empty-p clean) (gethash clean seen))
+           do (puthash clean t seen)
+           and collect
+           (let ((display
+                  (replace-regexp-in-string
+                   "\n" (propertize "⏎" 'face 'shadow)
+                   (if (> (length clean) 200)
+                       (concat (substring clean 0 200) "…")
+                     clean))))
+             ;; Disambiguate displays collapsed to the same string
+             ;; (e.g. entries differing only in stripped properties).
+             (while (gethash display lookup)
+               (setq display (concat display " ")))
+             (puthash display s lookup)
+             display))))
+    (when-let* ((result (fzf-sync-completing-read
+                         :candidates entries
+                         :prompt "yank-pop: "))
+                (text (gethash result lookup)))
+      (cond
+       ((eq last-command 'yank)
+        (let ((inhibit-read-only t)
+              (pt (point))
+              (mk (mark t)))
+          (funcall (or yank-undo-function #'delete-region)
+                   (min pt mk) (max pt mk))
+          (setq yank-undo-function nil)
+          (set-marker (mark-marker) pt (current-buffer))
+          (insert-for-yank text)))
+       (t
+        (push-mark)
+        (insert-for-yank text)))
+      (setq this-command 'yank))))
+
+;;;###autoload
 (defun fzf-async-bookmark ()
   "Jump to a bookmark."
   (interactive)
