@@ -675,6 +675,16 @@ Per-source plist keys:
   :annotate  Optional (cand) -> string annotation function.
   :action    Optional (cand) -> any.  Called with the selection.  When
              omitted, the raw selection string is returned."
+  (cond
+   ;; Composability: when this multi is being extracted by an outer
+   ;; `fzf-async-multi-from-commands', throw our merged SOURCES so the
+   ;; outer can flatten them into its own source list.  Each source
+   ;; already carries its own :action closure, so dispatch from the
+   ;; outer multi routes back to the correct underlying command.
+   ((eq fzf-async--multi-mode :extract)
+    (throw 'fzf-async-extracted (list :multi-sources sources)))
+   ((eq (car-safe fzf-async--multi-mode) :inject)
+    (cl-return-from fzf-async-multi (cdr fzf-async--multi-mode))))
   (when (bound-and-true-p helm-mode)
     (user-error "fzf-async-multi does not yet support helm-mode"))
   (let* ((n            (length sources))
@@ -935,40 +945,52 @@ Each command in COMMANDS is funcalled twice per multi session — once in
 the user picks (so the command's post-action runs).  OPTIONS is passed to
 `fzf-async-multi'.  Commands whose body does not reach
 `fzf-async-completing-read' or `fzf-sync-completing-read' are skipped.
-Commands must be arg-less (no interactive `read-*' prompts in their body)."
-  (let ((sources
-         (mapcar
-          (lambda (cmd)
-            (let ((args (condition-case nil
-                            (catch 'fzf-async-extracted
-                              (let ((fzf-async--multi-mode :extract))
-                                (funcall cmd))
-                              nil)
-                          (error nil))))
-              (when args
-                (let* ((cat (plist-get args :category))
-                       (default-annotate
-                        (cond
-                         ((memq cat '(fzf-async-buffer buffer))
-                          (lambda (c)
-                            (when (fboundp 'marginalia-annotate-buffer)
-                              (marginalia-annotate-buffer c))))
-                         ((memq cat '(fzf-async-file file))
-                          (lambda (c)
-                            (when (fboundp 'marginalia-annotate-file)
-                              (marginalia-annotate-file c)))))))
-                  (append
-                   (list :name (replace-regexp-in-string
-                                "^fzf-async-" "" (symbol-name cmd))
-                         :annotate (or (plist-get args :annotate)
-                                       default-annotate)
-                         :action (lambda (cand)
-                                   (let ((fzf-async--multi-mode
-                                          (cons :inject cand)))
-                                     (funcall cmd))))
-                   args)))))
-          commands)))
-    (apply #'fzf-async-multi (delq nil sources) options)))
+Commands must be arg-less (no interactive `read-*' prompts in their body).
+
+Composes: if a command in COMMANDS itself calls `fzf-async-multi' (e.g.
+`fzf-async-find-any'), its inner sources are flattened in alongside the
+other commands' sources, with each inner source keeping its own :action."
+  (let* ((source-lists
+          (mapcar
+           (lambda (cmd)
+             (let ((args (condition-case nil
+                             (catch 'fzf-async-extracted
+                               (let ((fzf-async--multi-mode :extract))
+                                 (funcall cmd))
+                               nil)
+                           (error nil))))
+               (when args
+                 (if-let* ((nested (plist-get args :multi-sources)))
+                     ;; Flatten: nested multi command's sources are
+                     ;; already fully built with :action closures.
+                     nested
+                   (let* ((cat (plist-get args :category))
+                          (default-annotate
+                           (cond
+                            ((memq cat '(fzf-async-buffer buffer))
+                             (lambda (c)
+                               (when (fboundp 'marginalia-annotate-buffer)
+                                 (marginalia-annotate-buffer c))))
+                            ((memq cat '(fzf-async-file file))
+                             (lambda (c)
+                               (when (fboundp 'marginalia-annotate-file)
+                                 (marginalia-annotate-file c)))))))
+                     ;; Wrap a single source in a list so `append'
+                     ;; below treats single and nested cases uniformly.
+                     (list
+                      (append
+                       (list :name (replace-regexp-in-string
+                                    "^fzf-async-" "" (symbol-name cmd))
+                             :annotate (or (plist-get args :annotate)
+                                           default-annotate)
+                             :action (lambda (cand)
+                                       (let ((fzf-async--multi-mode
+                                              (cons :inject cand)))
+                                         (funcall cmd))))
+                       args)))))))
+           commands))
+         (sources (apply #'append (delq nil source-lists))))
+    (apply #'fzf-async-multi sources options)))
 
 ;;;###autoload
 (defun fzf-async-find-any ()
