@@ -130,6 +130,44 @@ For LRU details, =SharedIdx= refcounting, the subsumption rule, and
 the parsed-pattern caching, see =fzf-native/architecture.org= §
 "Result cache".
 
+** Cross-session result cache (C-side)
+
+A second cache layer sits *between* sessions, keyed by =(command,
+directory)=.  When a new =fzf-async-completing-read= call invokes a
+command whose pool was completed in a prior session within the TTL
+window, fork+exec is skipped entirely and the new session adopts the
+cached candidate arena.  Only the scoring thread spawns.
+
+Knobs:
+
+| Variable                             | Default | Disables when |
+|--------------------------------------+---------+---------------|
+| =fzf-async-result-cache-ttl=         |     300 | nil or <= 0   |
+| =fzf-async-result-cache-entries=     |       3 | <= 0          |
+
+Both knobs are bridged onto the canonical
+=fzf-native-async-result-cache-*= via =:around= advice on the
+=fzf-native-async-start=, =-candidates=, and =-stop= entry points.
+The advice on =-stop= is essential — the capture-side defcustom read
+happens at stop, so the user-facing value must be in scope for the C
+symbol-value lookup.
+
+A session is eligible for capture iff, at stop time, the reader had
+seen pipe EOF (=fgets= returned NULL), the pool is non-empty, AND the
+session wasn't itself a cache adoption.  The cache is queried only at
+the explicit =fzf-native-async-stop= path; the user-ptr GC finalizer
+has no =emacs_env= and skips capture.
+
+Single-owner discipline: the candidate arena has exactly one owner at
+every moment — the live session, or the cache entry between sessions.
+Transfer is a structural copy + zero-out on the source side.  No
+refcounting.  *This relies on the upper-layer invariant that only one
+fzf-async session is live at a time* — see the Concurrency model
+section below.
+
+Eviction (TTL on lookup, LRU on insert) emits a =message= so the user
+has visibility into when the cache invalidates.
+
 ** Filter-only mode (C-side)
 
 Big-pool optimization: when the streaming pool reaches at least
@@ -500,6 +538,7 @@ mid-typing.
 | Idle-timer exhibits don't trip =while-no-input= inside =fzf-native-async-candidates=. | Idle timers don't count as pending input; regular timers do, which is why exhibits are *scheduled* by a regular timer but *fired* by an idle one. |
 | The Elisp side never blocks on the C scoring thread.      | =fzf-native-async-candidates= is non-blocking by contract — it returns the current snapshot immediately, regardless of scoring state. |
 | Marginalia annotators don't pull candidates into a different completion style. | =fzf-async-file= category routes file annotations through marginalia *and* keeps the completion style as =fzf-async=. |
+| At most one fzf-async session is live at any time.        | Minibuffer-driven: each =fzf-async-completing-read= owns the active minibuffer; the previous session is stopped before the next starts.  The cross-session result cache relies on this — a single owner at every moment, no refcounting between sessions. |
 
 * References
 
