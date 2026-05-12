@@ -592,10 +592,11 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
 ;;; Multi-source
 
 (defvar fzf-async-find-any-commands
-  '(fzf-async-imenu-all
+  '(fzf-async-imenu
     fzf-async-buffer
     fzf-async-recent-file
     fzf-async-find-hungry
+    fzf-async-imenu-all-but-current
     fzf-async-swiper-hungry)
   "Commands shown by `fzf-async-find-any'.
 Each is a command symbol whose body calls `fzf-async-completing-read' or
@@ -1320,22 +1321,30 @@ Constrained to `fzf-async-spotlight-audio-directories'."
       (goto-char (point-min))
       (forward-line (1- line)))))
 
-(defun fzf-async--imenu (multi)
+(defun fzf-async--imenu (scope)
   "Implementation of `fzf-async-imenu' / `fzf-async-imenu-all'.
-When MULTI is non-nil, walk every live non-internal buffer; otherwise
-just the current buffer.  Behaviour differences:
-- Single: display = NAME (with \"(CATEGORY)\" appended on cross-category
-  name collision); group header = imenu category.
-- Multi:  display = \"[CATEGORY] NAME\" (no collision possible — entries
-  are already partitioned by buffer); group header = buffer name."
+SCOPE selects which buffers to walk:
+  nil / `current'  — just the current buffer.
+  `all'            — every live non-internal buffer.
+  `others'         — every live non-internal buffer except the current one.
+Display differences:
+- Single buffer: display = NAME (with \"(CATEGORY)\" appended on
+  cross-category name collision); group header = imenu category.
+- Multi buffer:  display = \"[CATEGORY] NAME\" (no collision possible —
+  entries are already partitioned by buffer); group header = buffer name."
   (require 'imenu)
-  (let* ((buf-vec (vconcat
-                   (if multi
-                       (cl-remove-if
-                        (lambda (b) (or (minibufferp b)
-                                        (string-prefix-p " " (buffer-name b))))
-                        (buffer-list))
-                     (list (current-buffer)))))
+  (let* ((multi (memq scope '(all others)))
+         (buf-vec (vconcat
+                   (pcase scope
+                     ((or 'all 'others)
+                      (cl-remove-if
+                       (lambda (b)
+                         (or (minibufferp b)
+                             (string-prefix-p " " (buffer-name b))
+                             (and (eq scope 'others)
+                                  (eq b (current-buffer)))))
+                       (buffer-list)))
+                     (_ (list (current-buffer))))))
          (entries nil)
          (lookup (make-hash-table :test 'equal))
          (groups (make-hash-table :test 'equal)))
@@ -1375,7 +1384,10 @@ just the current buffer.  Behaviour differences:
     (when-let* ((result
                  (fzf-sync-completing-read
                   :candidates (nreverse entries)
-                  :prompt (if multi "imenu-all: " "imenu: ")
+                  :prompt (pcase scope
+                            ('all    "imenu-all: ")
+                            ('others "imenu-others: ")
+                            (_       "imenu: "))
                   :group
                   (lambda (cand transform)
                     (cond
@@ -1405,7 +1417,7 @@ just the current buffer.  Behaviour differences:
 (defun fzf-async-imenu ()
   "Jump to an imenu entry in the current buffer using fzf."
   (interactive)
-  (fzf-async--imenu nil))
+  (fzf-async--imenu 'current))
 
 ;;;###autoload
 (defun fzf-async-imenu-all ()
@@ -1413,7 +1425,15 @@ just the current buffer.  Behaviour differences:
 Buffers without an imenu index (or whose major mode does not support
 imenu) are skipped silently."
   (interactive)
-  (fzf-async--imenu t))
+  (fzf-async--imenu 'all))
+
+;;;###autoload
+(defun fzf-async-imenu-all-but-current ()
+  "Jump to an imenu entry across all open buffers except the current one.
+Buffers without an imenu index (or whose major mode does not support
+imenu) are skipped silently."
+  (interactive)
+  (fzf-async--imenu 'others))
 
 ;;;###autoload
 (defun fzf-async-swiper-hungry ()
