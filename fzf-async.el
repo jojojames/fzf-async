@@ -43,6 +43,7 @@
 (defvar fzf-native-async-highlight)
 (defvar fzf-native-max-line-length)
 (defvar fzf-native-async-cache-size)
+(defvar fzf-native-filter-only-min-pool)
 (defvar marginalia-annotate-file)
 (defvar marginalia-annotator-registry)
 (defvar marginalia-command-categories)
@@ -157,6 +158,31 @@ so the C scorer sees the chosen mode for the duration of the session."
   :type '(choice (const :tag "Smart case (default)" smart)
                  (const :tag "Ignore case"          ignore)
                  (const :tag "Respect case"         respect))
+  :group 'fzf-async)
+
+(defcustom fzf-async-filter-only-min-pool nil
+  "Pool size at which `fzf-async' switches to filter-only mode.
+When the streaming candidate pool reaches at least this size,
+scoring replaces full fzf evaluation with a cheap match-only check
+and skips top-K sorting.  Results are emitted in pool order
+(typically directory traversal order), capped at the candidate
+limit.
+
+The match-set is still built exhaustively so prefix refinement on
+the next keystroke is correct.  When the pool is below the
+threshold, full scoring + sort produces ranked results.
+
+Threshold is checked as `pool-size >= N', so values shape behaviour
+as follows:
+  0 (or nil) — feature disabled; full scoring always.
+  1          — filter-only as soon as the pool is non-empty
+               (effectively \"always filter\").
+  10000000   — filter-only only once the pool reaches 10M (default).
+
+Bridged onto the canonical `fzf-native-filter-only-min-pool' via
+`:around' advice on `fzf-native-async-start'."
+  :type '(choice (const :tag "Disabled" nil)
+                 (integer :tag "Minimum pool size"))
   :group 'fzf-async)
 
 (defcustom fzf-async-cache-size 40
@@ -1776,15 +1802,17 @@ Call `fzf-async-setup' before using fzf-async commands")))
 (defun fzf-async--bridge-defcustoms (orig-fn &rest args)
   "Wrap a fzf-native call so the C scorer sees fzf-async-* values.
 
-Bridges four knobs:
-  `fzf-async-highlight'       -> `fzf-native-async-highlight'
-  `fzf-async-max-line-length' -> `fzf-native-max-line-length'
-  `fzf-async-cache-size'      -> `fzf-native-async-cache-size'
-  `fzf-async-case-mode'       -> `fzf-native-case-mode'"
-  (let ((fzf-native-async-highlight  fzf-async-highlight)
-        (fzf-native-max-line-length  fzf-async-max-line-length)
-        (fzf-native-async-cache-size fzf-async-cache-size)
-        (fzf-native-case-mode        fzf-async-case-mode))
+Bridges five knobs:
+  `fzf-async-highlight'             -> `fzf-native-async-highlight'
+  `fzf-async-max-line-length'       -> `fzf-native-max-line-length'
+  `fzf-async-cache-size'            -> `fzf-native-async-cache-size'
+  `fzf-async-case-mode'             -> `fzf-native-case-mode'
+  `fzf-async-filter-only-min-pool'  -> `fzf-native-filter-only-min-pool'"
+  (let ((fzf-native-async-highlight       fzf-async-highlight)
+        (fzf-native-max-line-length       fzf-async-max-line-length)
+        (fzf-native-async-cache-size      fzf-async-cache-size)
+        (fzf-native-case-mode             fzf-async-case-mode)
+        (fzf-native-filter-only-min-pool  fzf-async-filter-only-min-pool))
     (apply orig-fn args)))
 
 ;;;###autoload
