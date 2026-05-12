@@ -44,6 +44,8 @@
 (defvar fzf-native-max-line-length)
 (defvar fzf-native-async-cache-size)
 (defvar fzf-native-filter-only-min-pool)
+(defvar fzf-native-async-result-cache-ttl)
+(defvar fzf-native-async-result-cache-entries)
 (defvar marginalia-annotate-file)
 (defvar marginalia-annotator-registry)
 (defvar marginalia-command-categories)
@@ -198,6 +200,52 @@ the LRU as long as those intermediate queries weren't evicted by
 unrelated lookups.
 
 Read at session start; changing it does not affect running sessions."
+  :type 'integer
+  :group 'fzf-async)
+
+(defcustom fzf-async-result-cache-ttl 300
+  "Time-to-live in seconds for the cross-session result cache.
+
+When non-nil and positive, the candidate pool from an fzf-async
+session whose subprocess closed stdout (reader hit EOF) is kept
+alive after the minibuffer exits.  A subsequent invocation of the
+same command in the same directory, within TTL seconds, skips the
+subprocess entirely and reuses the cached pool — useful for slow
+enumerations like `find ~' that return identical candidates on
+every run.
+
+A session is eligible to cache when the subprocess closed stdout
+(typically by exiting) before stop time AND the pool is non-empty.
+Sessions where the subprocess was still alive at stop are skipped
+— those would cache an incomplete pool.
+
+nil or <= 0 disables the cache (no lookup, no insert).
+
+Read on every fzf-async session start and stop.  Eviction (TTL
+expiry or LRU bound exceeded) emits a `message' so Emacs has
+visibility into when the cache invalidates.
+
+Bridged onto the canonical `fzf-native-async-result-cache-ttl' via
+`:around' advice on `fzf-native-async-start' /
+`fzf-native-async-stop' / `fzf-native-async-candidates'."
+  :type '(choice (const   :tag "Disabled" nil)
+                 (integer :tag "Seconds"))
+  :group 'fzf-async)
+
+(defcustom fzf-async-result-cache-entries 3
+  "Maximum entries in the cross-session result cache.
+LRU eviction once the count would exceed this bound.
+
+Each entry retains the full candidate arena (proportional to the
+number of candidates) plus a chunked pointer table.  Keep small —
+the cache is meant for a handful of repeated command shapes, not as
+a durable archive.
+
+Active only when `fzf-async-result-cache-ttl' is set; <= 0 disables
+the cache regardless of TTL.
+
+Bridged onto the canonical `fzf-native-async-result-cache-entries'
+via `:around' advice."
   :type 'integer
   :group 'fzf-async)
 
@@ -1802,17 +1850,21 @@ Call `fzf-async-setup' before using fzf-async commands")))
 (defun fzf-async--bridge-defcustoms (orig-fn &rest args)
   "Wrap a fzf-native call so the C scorer sees fzf-async-* values.
 
-Bridges five knobs:
-  `fzf-async-highlight'             -> `fzf-native-async-highlight'
-  `fzf-async-max-line-length'       -> `fzf-native-max-line-length'
-  `fzf-async-cache-size'            -> `fzf-native-async-cache-size'
-  `fzf-async-case-mode'             -> `fzf-native-case-mode'
-  `fzf-async-filter-only-min-pool'  -> `fzf-native-filter-only-min-pool'"
-  (let ((fzf-native-async-highlight       fzf-async-highlight)
-        (fzf-native-max-line-length       fzf-async-max-line-length)
-        (fzf-native-async-cache-size      fzf-async-cache-size)
-        (fzf-native-case-mode             fzf-async-case-mode)
-        (fzf-native-filter-only-min-pool  fzf-async-filter-only-min-pool))
+Bridges seven knobs:
+  `fzf-async-highlight'                  -> `fzf-native-async-highlight'
+  `fzf-async-max-line-length'            -> `fzf-native-max-line-length'
+  `fzf-async-cache-size'                 -> `fzf-native-async-cache-size'
+  `fzf-async-case-mode'                  -> `fzf-native-case-mode'
+  `fzf-async-filter-only-min-pool'       -> `fzf-native-filter-only-min-pool'
+  `fzf-async-result-cache-ttl'           -> `fzf-native-async-result-cache-ttl'
+  `fzf-async-result-cache-entries'       -> `fzf-native-async-result-cache-entries'"
+  (let ((fzf-native-async-highlight             fzf-async-highlight)
+        (fzf-native-max-line-length             fzf-async-max-line-length)
+        (fzf-native-async-cache-size            fzf-async-cache-size)
+        (fzf-native-case-mode                   fzf-async-case-mode)
+        (fzf-native-filter-only-min-pool        fzf-async-filter-only-min-pool)
+        (fzf-native-async-result-cache-ttl      fzf-async-result-cache-ttl)
+        (fzf-native-async-result-cache-entries  fzf-async-result-cache-entries))
     (apply orig-fn args)))
 
 ;;;###autoload
@@ -1827,6 +1879,11 @@ Call this once during init before using `fzf-async-completing-read'."
 
   (advice-add 'fzf-native-async-start      :around #'fzf-async--bridge-defcustoms)
   (advice-add 'fzf-native-async-candidates :around #'fzf-async--bridge-defcustoms)
+  ;; Stop reads `fzf-native-async-result-cache-{ttl,entries}' when
+  ;; deciding whether to capture the just-finished arena into the
+  ;; cross-session result cache.  Without this advice the bridged
+  ;; user-facing knobs would be invisible to the C-side reader.
+  (advice-add 'fzf-native-async-stop       :around #'fzf-async--bridge-defcustoms)
 
   ;; Shadow categories for `file' / `buffer' / multi: keep marginalia +
   ;; embark integration but force the passthrough style so other styles
