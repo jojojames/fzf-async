@@ -153,10 +153,13 @@ happens at stop, so the user-facing value must be in scope for the C
 symbol-value lookup.
 
 A session is eligible for capture iff, at stop time, the reader had
-seen pipe EOF (=fgets= returned NULL), the pool is non-empty, AND the
-session wasn't itself a cache adoption.  The cache is queried only at
-the explicit =fzf-native-async-stop= path; the user-ptr GC finalizer
-has no =emacs_env= and skips capture.
+seen pipe EOF (=fgets= returned NULL) AND the pool is non-empty.
+Cache-hit sessions re-capture on stop — the entry was unlinked at
+adoption, so capture pushes it back with a refreshed timestamp.
+Without this, the cache would be effectively single-use (drained on
+the first hit, no entry left for the next start).  The cache is
+queried only at the explicit =fzf-native-async-stop= path; the
+user-ptr GC finalizer has no =emacs_env= and skips capture.
 
 Single-owner discipline: the candidate arena has exactly one owner at
 every moment — the live session, or the cache entry between sessions.
