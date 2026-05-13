@@ -1452,9 +1452,23 @@ Constrained to `fzf-async-spotlight-audio-directories'."
 (defun fzf-async-tramp ()
   "Connect to a remote host via TRAMP, with hosts from ~/.ssh/config."
   (interactive)
-  (let* ((hosts (fzf-async--ssh-hosts))
-         (host (completing-read "SSH host: " hosts nil t)))
-    (find-file (concat "/ssh:" host ":"))))
+  (cl-labels ((ssh-hosts ()
+                (let ((config (expand-file-name "~/.ssh/config"))
+                      hosts)
+                  (when (file-readable-p config)
+                    (with-temp-buffer
+                      (insert-file-contents config)
+                      (while (re-search-forward
+                              "^[Hh]ost[[:space:]]+\\(.+\\)" nil t)
+                        (dolist (host (split-string (match-string 1)))
+                          (unless (string-match-p "[*?!]" host)
+                            (push host hosts))))))
+                  (nreverse hosts))))
+    (when-let* ((hosts (or (ssh-hosts)
+                           (user-error "No SSH hosts in ~/.ssh/config")))
+                (host (fzf-sync-completing-read
+                       :candidates hosts :prompt "ssh: ")))
+      (find-file (concat "/ssh:" host ":")))))
 
 ;;;###autoload
 (defun fzf-async-swiper ()
@@ -1487,56 +1501,57 @@ Constrained to `fzf-async-spotlight-audio-directories'."
 (defun fzf-async-swiper-all ()
   "Search lines across all open buffers using fzf."
   (interactive)
-  (let* ((buffers (cl-remove-if
-                   (lambda (b)
-                     (or (minibufferp b)
-                         (string-prefix-p " " (buffer-name b))))
-                   (buffer-list)))
-         (buf-vec (vconcat buffers))
-         (candidates
-          (cl-loop for buf across buf-vec
-                   for i from 0
-                   for pfx = (format "%d-%s" i (fzf-async--sanitize-filename
-                                                (buffer-name buf)))
-                   append (with-current-buffer buf
-                            (let (lines)
-                              (save-excursion
-                                (goto-char (point-min))
-                                (let ((j 1))
-                                  (while (not (eobp))
-                                    (let ((content
-                                           (buffer-substring-no-properties
-                                            (line-beginning-position)
-                                            (line-end-position))))
-                                      (unless (string-empty-p content)
-                                        (push (format "%s:%d:%s" pfx j content)
-                                              lines)))
-                                    (forward-line 1)
-                                    (cl-incf j))))
-                              (nreverse lines))))))
-    (when-let* ((r (fzf-sync-completing-read
-                    :candidates candidates
-                    :prompt "swiper-all: "
-                    :group (lambda (cand transform)
-                             ;; Candidates: "IDX-BUFNAME:LINE:CONTENT"
-                             (if transform
-                                 ;; Display: strip "IDX-BUFNAME:" prefix
-                                 (when (string-match "^[^:]+:\\(.*\\)$" cand)
-                                   (match-string 1 cand))
-                               ;; Group header: actual buffer name from index
-                               (when (string-match "^\\([0-9]+\\)-" cand)
-                                 (let ((i (string-to-number (match-string 1 cand))))
-                                   (when (< i (length buf-vec))
-                                     (buffer-name (aref buf-vec i)))))))))
-                (match (string-match "^\\([0-9]+\\)-[^:]*:\\([0-9]+\\):" r))
-                (idx (string-to-number (match-string 1 r)))
-                (line (string-to-number (match-string 2 r)))
-                ((< idx (length buf-vec)))
-                (buffer (aref buf-vec idx))
-                ((buffer-live-p buffer)))
-      (switch-to-buffer buffer)
-      (goto-char (point-min))
-      (forward-line (1- line)))))
+  (cl-labels ((sanitize (name)
+                (replace-regexp-in-string "[/\\*?<>|: ]" "-" name)))
+    (let* ((buffers (cl-remove-if
+                     (lambda (b)
+                       (or (minibufferp b)
+                           (string-prefix-p " " (buffer-name b))))
+                     (buffer-list)))
+           (buf-vec (vconcat buffers))
+           (candidates
+            (cl-loop for buf across buf-vec
+                     for i from 0
+                     for pfx = (format "%d-%s" i (sanitize (buffer-name buf)))
+                     append (with-current-buffer buf
+                              (let (lines)
+                                (save-excursion
+                                  (goto-char (point-min))
+                                  (let ((j 1))
+                                    (while (not (eobp))
+                                      (let ((content
+                                             (buffer-substring-no-properties
+                                              (line-beginning-position)
+                                              (line-end-position))))
+                                        (unless (string-empty-p content)
+                                          (push (format "%s:%d:%s" pfx j content)
+                                                lines)))
+                                      (forward-line 1)
+                                      (cl-incf j))))
+                                (nreverse lines))))))
+      (when-let* ((r (fzf-sync-completing-read
+                      :candidates candidates
+                      :prompt "swiper-all: "
+                      :group (lambda (cand transform)
+                               ;; Candidates: "IDX-BUFNAME:LINE:CONTENT"
+                               (if transform
+                                   ;; Display: strip "IDX-BUFNAME:" prefix
+                                   (when (string-match "^[^:]+:\\(.*\\)$" cand)
+                                     (match-string 1 cand))
+                                 ;; Group header: actual buffer name from index
+                                 (when (string-match "^\\([0-9]+\\)-" cand)
+                                   (let ((i (string-to-number (match-string 1 cand))))
+                                     (when (< i (length buf-vec))
+                                       (buffer-name (aref buf-vec i)))))))))
+                  (match (string-match "^\\([0-9]+\\)-[^:]*:\\([0-9]+\\):" r))
+                  (idx (string-to-number (match-string 1 r)))
+                  (line (string-to-number (match-string 2 r)))
+                  ((< idx (length buf-vec)))
+                  (buffer (aref buf-vec idx))
+                  ((buffer-live-p buffer)))
+        (switch-to-buffer buffer)
+        (goto-char (point-min))
+        (forward-line (1- line))))))
 
 (defun fzf-async--imenu (scope)
   "Implementation of `fzf-async-imenu' / `fzf-async-imenu-all'.
@@ -1764,23 +1779,6 @@ descend from A may exclude files the user expects to search."
                                          (string-prefix-p other dir)))
                                   unique))
              collect dir)))
-
-(defun fzf-async--sanitize-filename (name)
-  "Replace filename-unsafe characters in NAME with hyphens."
-  (replace-regexp-in-string "[/\\*?<>|: ]" "-" name))
-
-(defun fzf-async--ssh-hosts ()
-  "Return SSH host names from ~/.ssh/config, excluding wildcard patterns."
-  (let ((config (expand-file-name "~/.ssh/config"))
-        hosts)
-    (when (file-readable-p config)
-      (with-temp-buffer
-        (insert-file-contents config)
-        (while (re-search-forward "^[Hh]ost[[:space:]]+\\(.+\\)" nil t)
-          (dolist (host (split-string (match-string 1)))
-            (unless (string-match-p "[*?!]" host)
-              (push host hosts))))))
-    (nreverse hosts)))
 
 ;;; Shell command
 
