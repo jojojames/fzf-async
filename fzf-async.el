@@ -53,6 +53,7 @@
 (declare-function imenu--subalist-p "imenu")
 (defvar ivy-text)
 (defvar ivy--index)
+(defvar ivy--all-candidates)
 (defvar ivy-count-format)
 (defvar ivy-completing-read-dynamic-collection)
 (declare-function ivy--set-candidates "ivy")
@@ -229,6 +230,19 @@ Returns nil for frontends that do not expose a selection index (e.g. icomplete).
    ((bound-and-true-p vertico-mode) (max 0 vertico--index))
    ((bound-and-true-p ivy-mode) (and (boundp 'ivy--index) (max 0 ivy--index)))
    (t nil)))
+
+(defun fzf-async--frontend-candidate ()
+  "Return the currently highlighted candidate string in the active UI, or nil.
+Used to implement live preview (e.g. `fzf-async-theme')."
+  (cond
+   ((bound-and-true-p vertico-mode)
+    (when (and (boundp 'vertico--candidates) vertico--candidates)
+      (nth (max 0 vertico--index) vertico--candidates)))
+   ((bound-and-true-p ivy-mode)
+    (when (and (boundp 'ivy--all-candidates) ivy--all-candidates)
+      (nth (max 0 ivy--index) ivy--all-candidates)))
+   ((bound-and-true-p icomplete-mode)
+    (car (completion-all-sorted-completions)))))
 
 (defun fzf-async--frontend-exhibit ()
   "Trigger a display refresh in the active completion UI.
@@ -1282,6 +1296,45 @@ yanked text with the selection (mirroring `yank-pop' / `consult-yank-pop')."
     (when-let* ((result (fzf-sync-completing-read
                          :candidates names :prompt "bookmark: ")))
       (bookmark-jump result))))
+
+;;;###autoload
+(defun fzf-async-theme ()
+  "Prompt for a theme to enable, with live preview as the selection moves.
+Aborting (e.g. \\[keyboard-quit]) restores the themes that were enabled
+when the command was invoked.  Selecting \"default\" disables all themes."
+  (interactive)
+  (cl-labels ((switch (sym)
+                (dolist (th custom-enabled-themes)
+                  (unless (eq th sym) (disable-theme th)))
+                (when (and sym (not (memq sym custom-enabled-themes)))
+                  (if (custom-theme-p sym)
+                      (enable-theme sym)
+                    (load-theme sym :no-confirm)))))
+    (let* ((saved custom-enabled-themes)
+           (last 'unset)
+           (preview
+            (lambda ()
+              (when-let* ((cand (fzf-async--frontend-candidate)))
+                (unless (equal cand last)
+                  (setq last cand)
+                  (condition-case _
+                      (switch (and (not (equal cand "default")) (intern cand)))
+                    (error nil))))))
+           selection)
+      (unwind-protect
+          (minibuffer-with-setup-hook
+              (lambda ()
+                (add-hook 'post-command-hook preview nil t))
+            (setq selection
+                  (fzf-sync-completing-read
+                   :candidates (cons "default"
+                                     (mapcar #'symbol-name
+                                             (custom-available-themes)))
+                   :prompt "theme: ")))
+        (if selection
+            (switch (and (not (equal selection "default")) (intern selection)))
+          (mapc #'disable-theme custom-enabled-themes)
+          (mapc #'enable-theme (reverse saved)))))))
 
 ;;;###autoload
 (defun fzf-async-locate ()
