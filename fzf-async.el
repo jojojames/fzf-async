@@ -1284,6 +1284,64 @@ yanked text with the selection (mirroring `yank-pop' / `consult-yank-pop')."
         (insert-for-yank text)))
       (setq this-command 'yank))))
 
+(defcustom fzf-async-shell-history-file nil
+  "Path to a shell history file (bash or zsh).
+When nil, defaults to `$HISTFILE' if set, otherwise `~/.zsh_history'."
+  :type '(choice (const :tag "Auto ($HISTFILE or ~/.zsh_history)" nil)
+                 file)
+  :group 'fzf-async)
+
+;;;###autoload
+(defun fzf-async-shell-history ()
+  "Select a command from the shell history file and insert it at point.
+Supports bash and zsh history file formats (including zsh
+`EXTENDED_HISTORY' and bash `HISTTIMEFORMAT' timestamp comments).
+If the current buffer is read-only the selection is copied to the
+kill ring instead.  Override the location via
+`fzf-async-shell-history-file'."
+  (interactive)
+  (cl-labels
+      ((parse-entry (raw)
+         (cond
+          ((string-match "\\`: [0-9]+:[0-9]+;\\(\\(?:.\\|\n\\)*\\)\\'" raw)
+           (match-string 1 raw))
+          ((string-match-p "\\`#[0-9]+\\'" raw) nil)
+          (t raw)))
+       (read-entries (file)
+         (let ((seen (make-hash-table :test 'equal)) results)
+           (with-temp-buffer
+             (let ((coding-system-for-read 'utf-8-auto))
+               (insert-file-contents file))
+             (while (not (eobp))
+               (let ((start (point)))
+                 (end-of-line)
+                 ;; Continuations: trailing backslash escapes the newline.
+                 (while (and (eq (char-before) ?\\) (not (eobp)))
+                   (forward-char 1) (end-of-line))
+                 (when-let* ((cmd (parse-entry
+                                   (buffer-substring-no-properties
+                                    start (point))))
+                             (cmd (string-trim cmd))
+                             ((not (string-empty-p cmd)))
+                             ((not (gethash cmd seen))))
+                   (puthash cmd t seen)
+                   (push cmd results))
+                 (unless (eobp) (forward-char 1)))))
+           results)))
+    (let* ((file (expand-file-name
+                  (or fzf-async-shell-history-file
+                      (getenv "HISTFILE")
+                      "~/.zsh_history")))
+           (cmds (and (or (file-readable-p file)
+                          (user-error "Cannot read shell history: %s" file))
+                      (or (read-entries file)
+                          (user-error "Shell history is empty")))))
+      (when-let* ((result (fzf-sync-completing-read
+                           :candidates cmds :prompt "shell-history: ")))
+        (if buffer-read-only
+            (progn (kill-new result) (message "Copied: %s" result))
+          (insert result))))))
+
 ;;;###autoload
 (defun fzf-async-bookmark ()
   "Jump to a bookmark."
