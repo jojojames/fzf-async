@@ -153,20 +153,37 @@ happens at stop, so the user-facing value must be in scope for the C
 symbol-value lookup.
 
 A session is eligible for capture iff, at stop time, the reader had
-seen pipe EOF (=fgets= returned NULL) AND the pool is non-empty.
+seen pipe EOF *before* the stop request was issued AND the pool is
+non-empty.  =fzf-native-async-stop= snapshots =reader_drained= prior to
+calling =async_session_freeze=; freeze itself sends SIGTERM to the
+child, which would otherwise force the flag to true via reader-EOF
+along the kill path and make "completed naturally" indistinguishable
+from "killed mid-stream."  The snapshot resolves the ambiguity: only
+sessions whose underlying command reached natural end-of-stream before
+the user picked are captured.  Sessions interrupted mid-enumeration
+(=find /= picked at 200 ms, etc.) are skipped.
+
 Cache-hit sessions re-capture on stop — the entry was unlinked at
 adoption, so capture pushes it back with a refreshed timestamp.
-Without this, the cache would be effectively single-use (drained on
-the first hit, no entry left for the next start).  The cache is
-queried only at the explicit =fzf-native-async-stop= path; the
-user-ptr GC finalizer has no =emacs_env= and skips capture.
+Cache-hit sessions pre-set =reader_drained= at adopt time (no reader
+exists), so the eligibility snapshot reads true for them.  Without
+this, the cache would be effectively single-use (drained on the first
+hit, no entry left for the next start).  The cache is queried only at
+the explicit =fzf-native-async-stop= path; the user-ptr GC finalizer
+has no =emacs_env= and skips capture.
 
-Single-owner discipline: the candidate arena has exactly one owner at
-every moment — the live session, or the cache entry between sessions.
-Transfer is a structural copy + zero-out on the source side.  No
-refcounting.  *This relies on the upper-layer invariant that only one
-fzf-async session is live at a time* — see the Concurrency model
-section below.
+Per-session ownership: each AsyncSession owns its own candidate arena,
+chunked candidate table, and per-session query cache; nothing is
+shared across sessions.  The cross-session result cache holds at most
+one entry per =(command, dir)= key, and a key's entry transitions
+atomically from cache → session on adoption (lookup unlinks) and
+session → cache on capture (structural copy + zero-out on the source
+side).  No refcounting.  Multiple sessions may be live concurrently
+(=fzf-async--multi-read= starts N) — that is fine because no arena is
+ever shared.  What does the structural transfer rely on?  The cache
+LRU mutex serializing the list ops, and the fact that all module
+entry points run on the Emacs main thread (so adopt/capture for the
+same key never race).
 
 Eviction (TTL on lookup, LRU on insert) emits a =message= so the user
 has visibility into when the cache invalidates.
@@ -541,7 +558,7 @@ mid-typing.
 | Idle-timer exhibits don't trip =while-no-input= inside =fzf-native-async-candidates=. | Idle timers don't count as pending input; regular timers do, which is why exhibits are *scheduled* by a regular timer but *fired* by an idle one. |
 | The Elisp side never blocks on the C scoring thread.      | =fzf-native-async-candidates= is non-blocking by contract — it returns the current snapshot immediately, regardless of scoring state. |
 | Marginalia annotators don't pull candidates into a different completion style. | =fzf-async-file= category routes file annotations through marginalia *and* keeps the completion style as =fzf-async=. |
-| At most one fzf-async session is live at any time.        | Minibuffer-driven: each =fzf-async-completing-read= owns the active minibuffer; the previous session is stopped before the next starts.  The cross-session result cache relies on this — a single owner at every moment, no refcounting between sessions. |
+| At most one =fzf-async-completing-read= minibuffer is open at a time, but the *session* count is not bounded to one. | =fzf-async--multi-read= starts N concurrent =fzf-native-async-start= handles, one per async source.  Each session has its own arena and threads; nothing is shared across sessions.  The cross-session result cache is safe under multi because module entry points are main-thread-serialized and per-key adopt/capture transitions are atomic — not because only one session is live. |
 
 * References
 
