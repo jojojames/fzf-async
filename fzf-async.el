@@ -613,18 +613,6 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
 
 ;;; Multi-source
 
-(defvar fzf-async-find-any-commands
-  '(fzf-async-imenu
-    fzf-async-buffer
-    fzf-async-recent-file
-    fzf-async-find-hungry
-    fzf-async-imenu-all-but-current
-    fzf-async-swiper-hungry)
-  "Commands shown by `fzf-async-find-any'.
-Each is a command symbol whose body calls `fzf-async-completing-read' or
-`fzf-sync-completing-read'.  The source is derived automatically; see
-`fzf-async-multi-read'.")
-
 (defun fzf-async--multi-tag (cand idx hash)
   "Tag CAND with source IDX (text-prop + HASH lookup table); return CAND."
   (when (> (length cand) 0)
@@ -993,16 +981,38 @@ the other commands' sources, with each inner source keeping its own
          (sources (apply #'append (delq nil source-lists))))
     (apply #'fzf-async--multi-read sources options)))
 
+(defcustom fzf-async-find-any-commands
+  '(fzf-async-imenu
+    fzf-async-buffer
+    fzf-async-recent-file
+    fzf-async-find-hungry
+    fzf-async-imenu-all-but-current
+    fzf-async-swiper-hungry)
+  "Commands shown by `fzf-async-find-any'."
+  :type '(repeat function)
+  :group 'fzf-async)
+
+(defcustom fzf-async-find-some-commands
+  '(fzf-async-imenu
+    fzf-async-buffer
+    fzf-async-recent-file
+    fzf-async-find
+    fzf-async-swiper)
+  "Commands shown by `fzf-async-find-some'."
+  :type '(repeat function)
+  :group 'fzf-async)
+
 ;;;###autoload
 (defun fzf-async-find-any ()
-  "Multi-source fuzzy completion over `fzf-async-find-any-commands'.
-Defaults: live buffers, `recentf' files, and a hungry-find over the parent
-directories of all file-visiting buffers.  Each command's source is
-derived automatically — see `fzf-async-multi-read'."
+  "Multi-source fuzzy completion over `fzf-async-find-any-commands'."
   (interactive)
-  (fzf-async-multi-read
-   fzf-async-find-any-commands
-   :prompt "any?: "))
+  (fzf-async-multi-read fzf-async-find-any-commands :prompt "any?: "))
+
+;;;###autoload
+(defun fzf-async-find-some ()
+  "Multi-source fuzzy completion over `fzf-async-find-some-commands'."
+  (interactive)
+  (fzf-async-multi-read fzf-async-find-some-commands :prompt "some?: "))
 
 ;;; Commands
 
