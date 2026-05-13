@@ -1717,11 +1717,358 @@ Like `fzf-async-shell-command' but runs in the project root."
                              nil 'fzf-async-shell-command-history)))
   (fzf-async-shell-command command (fzf-async--default-dir)))
 
+;;; Consult-style two-pass async
+
+(defcustom fzf-async-consult-split-style 'perl
+  "Splitting style for `fzf-async-consult-completing-read'.
+Mirrors `consult-async-split-style'.  See
+`fzf-async-consult-split-styles-alist' for available styles and the
+contract for adding new ones."
+  :type '(choice (const :tag "Perl-style (#cmd#filter)" perl))
+  :group 'fzf-async)
+
+(defcustom fzf-async-consult-split-styles-alist
+  `((perl :initial ?# :function ,#'fzf-async--split-perl))
+  "Splitting styles for `fzf-async-consult-completing-read'.
+Each entry is (SYMBOL . PLIST).  Recognized PLIST keys:
+  :function  (STR PLIST) -> (ASYNC . FILTER).  Required.
+             ASYNC is the shell-command portion (re-runs on change);
+             FILTER is passed to fzf-native for scoring.
+  :initial   Optional character inserted at minibuffer setup so the
+             user can start typing inside the delimited region.
+  :separator Optional character; consumed by separator-based splitters.
+Other styles (comma, semicolon, etc.) can be added by registering
+additional entries here and providing a corresponding splitter."
+  :type '(alist :key-type symbol :value-type plist)
+  :group 'fzf-async)
+
+(defun fzf-async--split-perl (str &optional _plist)
+  "Split STR into (ASYNC . FILTER) using a perl-style separator.
+If the first character of STR is punctuation it is the separator: text
+between the first and second occurrence is ASYNC; text after the second
+is FILTER.  With one separator only, the trailing text is ASYNC and
+FILTER is empty.  Without a leading separator, the whole STR is ASYNC."
+  (if (string-match-p "^[[:punct:]]" str)
+      (save-match-data
+        (let ((q (regexp-quote (substring str 0 1))))
+          (cond
+           ((string-match (concat "^" q "\\([^" q "]*\\)" q "\\(.*\\)") str)
+            (cons (match-string 1 str) (match-string 2 str)))
+           (t
+            (cons (substring str 1) "")))))
+    (cons str "")))
+
+;;;###autoload
+(cl-defun fzf-async-consult-completing-read
+    (&key prompt
+          (directory (fzf-async--default-dir))
+          group
+          initial-input
+          (resolve-paths nil))
+  "Consult-style two-pass async completing-read.
+
+Input is split into a shell-COMMAND part and an fzf-FILTER part via
+`fzf-async-consult-split-style'.  With the default `perl' style the
+prompt has shape \"#COMMAND#FILTER\" (the leading `#' is inserted
+automatically).  Changing COMMAND restarts the underlying process;
+changing FILTER rescores in place via fzf-native.
+
+:PROMPT         Minibuffer prompt.  Defaults to \"fzf-consult: \".
+:DIRECTORY      Working directory for COMMAND.
+:GROUP          Optional grouping function.
+:INITIAL-INPUT  Optional initial minibuffer contents.  Either a string
+                or a cons (TEXT . POSITION); POSITION is a 0-based
+                offset within TEXT at which point is placed.
+:RESOLVE-PATHS  When non-nil, the returned candidate is passed through
+                `expand-file-name' against :DIRECTORY.  Off by default
+                since the shell command's output is often free-form."
+  (let* ((prompt (or prompt "fzf-consult: "))
+         (dir (expand-file-name directory))
+         (dir-abbrev (abbreviate-file-name directory))
+         (style-sym (or fzf-async-consult-split-style 'perl))
+         (style (or (alist-get style-sym fzf-async-consult-split-styles-alist)
+                    (user-error "Unknown fzf-async-consult split style: %s"
+                                style-sym)))
+         (initial-char (plist-get style :initial))
+         (init-text (if (consp initial-input) (car initial-input) initial-input))
+         (init-point (and (consp initial-input) (cdr initial-input)))
+         (splitter (plist-get style :function))
+         (limit (and fzf-async-max-candidates
+                     (> fzf-async-max-candidates 0)
+                     fzf-async-max-candidates))
+         (handle nil)
+         (current-cmd nil)
+         (last-gen -1)
+         (last-result nil)
+         (last-filtered 0)
+         (last-total 0)
+         (last-exhibit-scheduled 0.0)
+         (last-restart-time 0.0)
+         (pending-cmd nil)
+         (stats-overlay nil)
+         restart-timer retry-timer poll-timer
+         (refresh-overlay
+          (lambda ()
+            (when (and stats-overlay (active-minibuffer-window))
+              (with-selected-window (active-minibuffer-window)
+                (let ((idx (fzf-async--frontend-index)))
+                  (overlay-put
+                   stats-overlay 'display
+                   (if idx
+                       (format "%s%s %d/[%s](%s) "
+                               prompt dir-abbrev (1+ idx)
+                               (fzf-async--commas last-filtered)
+                               (fzf-async--commas last-total))
+                     (format "%s%s [%s](%s) "
+                             prompt dir-abbrev
+                             (fzf-async--commas last-filtered)
+                             (fzf-async--commas last-total)))))))))
+         (do-restart
+          (lambda (cmd)
+            (when handle
+              (let ((h handle))
+                (setq handle nil)
+                (run-at-time 0 nil (lambda () (fzf-native-async-stop h)))))
+            ;; Keep `last-result' across restarts so the display stays
+            ;; populated with stale candidates until new ones stream in.
+            (setq current-cmd cmd
+                  last-gen -1
+                  last-filtered 0
+                  last-total 0
+                  last-restart-time (float-time))
+            (when (and cmd (not (string-empty-p cmd)))
+              (setq handle (fzf-native-async-start cmd dir)))
+            (fzf-async--frontend-exhibit)))
+         (table
+          (lambda (str _pred action)
+            (pcase action
+              ('metadata
+               `(metadata (category . fzf-async-consult)
+                          (display-sort-function . identity)
+                          (cycle-sort-function . identity)
+                          ,@(when group `((group-function . ,group)))))
+              (`(boundaries . ,_) (cons 0 0))
+              ('t
+               (let* ((input
+                       (if (not (string-empty-p str))
+                           str
+                         (or (when-let* ((win (active-minibuffer-window)))
+                               (with-current-buffer (window-buffer win)
+                                 (minibuffer-contents-no-properties)))
+                             "")))
+                      (split (funcall splitter input style))
+                      (cmd (car split))
+                      (query (cdr split)))
+                 (cond
+                  ((not (equal cmd current-cmd))
+                   ;; Rate-limited restart: leading edge fires immediately
+                   ;; (when the throttle window has elapsed), trailing edge
+                   ;; fires the latest pending cmd after the window.
+                   ;; `run-with-timer' (not idle) so the trailing fire
+                   ;; happens even during continuous typing.
+                   (setq pending-cmd cmd)
+                   (let* ((now     (float-time))
+                          (elapsed (- now last-restart-time)))
+                     (cond
+                      ((>= elapsed fzf-async-input-throttle)
+                       (when restart-timer
+                         (cancel-timer restart-timer)
+                         (setq restart-timer nil))
+                       (funcall do-restart cmd))
+                      ((null restart-timer)
+                       (setq restart-timer
+                             (run-with-timer
+                              (max 0.01
+                                   (- fzf-async-input-throttle elapsed))
+                              nil
+                              (lambda ()
+                                (setq restart-timer nil)
+                                (funcall do-restart pending-cmd)))))))
+                   ;; Also fetch from the *current* handle (the previous
+                   ;; cmd's process) so the display reflects something
+                   ;; while the user is mid-typing.  Without this, vertico
+                   ;; would just keep redisplaying a frozen `last-result'
+                   ;; until cursor-move accidentally hits the fetch branch
+                   ;; below — which is exactly the user-visible bug where
+                   ;; typing in the cmd portion appears to do nothing.
+                   ;; Mirrors consult's behavior of keeping the prior
+                   ;; process's candidates in the sink until the new
+                   ;; process produces output.
+                   (let ((r (and handle
+                                 (fzf-native-async-candidates
+                                  handle query limit))))
+                     (when r (setq last-result r))
+                     (or r last-result)))
+                  ((null handle) last-result)
+                  (t
+                   (let ((r (while-no-input
+                              (fzf-native-async-candidates
+                               handle query limit))))
+                     (cond
+                      ((eq r t)
+                       (when retry-timer (cancel-timer retry-timer))
+                       (setq retry-timer
+                             (run-with-idle-timer
+                              fzf-async-input-debounce nil
+                              (lambda ()
+                                (setq retry-timer nil)
+                                (fzf-async--frontend-exhibit))))
+                       last-result)
+                      (t
+                       (when-let* ((stats (fzf-native-async-stats handle)))
+                         (setq last-filtered (car stats)
+                               last-total    (cdr stats)))
+                       (when-let* ((win (active-minibuffer-window)))
+                         (with-selected-window win
+                           (unless stats-overlay
+                             (setq stats-overlay
+                                   (make-overlay (point-min)
+                                                 (minibuffer-prompt-end))))
+                           (funcall refresh-overlay)))
+                       ;; Preserve `last-result' across empty fetches so a
+                       ;; new handle that hasn't streamed yet doesn't blank
+                       ;; the display; trade-off is that a query with truly
+                       ;; zero matches keeps showing prior candidates until
+                       ;; a non-empty result replaces them.  The stats
+                       ;; overlay still reflects 0/0 truthfully.
+                       (when r (setq last-result r))
+                       (or r last-result))))))))
+              (_ t)))))
+    ;; When an init-text supplies a non-empty cmd, pre-start the async
+    ;; process so candidates begin streaming before the user touches the
+    ;; minibuffer.  Otherwise the first table call only schedules a
+    ;; debounced restart and the display sits empty until the timer fires.
+    (when init-text
+      (let ((cmd (car (funcall splitter init-text style))))
+        (when (and cmd (not (string-empty-p cmd)))
+          (funcall do-restart cmd))))
+    (setq poll-timer
+          (run-with-timer
+           0 fzf-async-refresh-delay
+           (lambda ()
+             (when handle
+               (let ((gen (fzf-native-async-generation handle)))
+                 (when (and gen (not (= gen last-gen)) (not (input-pending-p))
+                            (>= (- (float-time) last-exhibit-scheduled)
+                                fzf-async-input-throttle))
+                   (setq last-gen gen
+                         last-exhibit-scheduled (float-time))
+                   (run-with-idle-timer
+                    0 nil #'fzf-async--frontend-exhibit)))))))
+    (add-hook 'post-command-hook refresh-overlay)
+    (sit-for fzf-async-refresh-delay)
+    (fzf-async--maybe-expand
+     (unwind-protect
+         (minibuffer-with-setup-hook
+             (lambda ()
+               ;; Auto-insert the separator only when no init-text was
+               ;; supplied; otherwise the caller is responsible for the
+               ;; prefix.
+               (when (and initial-char (null init-text))
+                 (save-excursion
+                   (goto-char (minibuffer-prompt-end))
+                   (unless (equal initial-char (char-after))
+                     (insert (char-to-string initial-char)))))
+               (when init-point
+                 ;; Defer so positioning happens after completing-read
+                 ;; inserts INITIAL-INPUT, regardless of hook order.
+                 (let ((p init-point))
+                   (run-at-time
+                    0 nil
+                    (lambda ()
+                      (when-let* ((win (active-minibuffer-window)))
+                        (with-selected-window win
+                          (goto-char (+ (minibuffer-prompt-end) p))))))))
+               (when (boundp 'vertico-count-format)
+                 (setq-local vertico-count-format nil))
+               (when (boundp 'icomplete-matches-format)
+                 (setq-local icomplete-matches-format nil)))
+           (completing-read prompt table nil nil init-text nil))
+       (when poll-timer (cancel-timer poll-timer))
+       (when retry-timer (cancel-timer retry-timer))
+       (when restart-timer (cancel-timer restart-timer))
+       (remove-hook 'post-command-hook refresh-overlay)
+       (when stats-overlay (delete-overlay stats-overlay))
+       (when handle
+         (let ((h handle))
+           (run-at-time 0 nil (lambda () (fzf-native-async-stop h))))))
+     directory resolve-paths)))
+
+;;;###autoload
+(defun fzf-async-consult (&optional directory)
+  "Consult-style fuzzy search in one minibuffer prompt.
+
+The minibuffer is split into a shell-command part and an fzf-filter
+part by `#'.  Edit the command part to re-run the underlying process;
+edit the filter part to fuzzy-search the output via fzf-native.
+
+DIRECTORY defaults to `default-directory'.  See
+`fzf-async-consult-completing-read' for split-syntax details and the
+related customization variables.
+
+On selection: opens the candidate as a file if it exists relative to
+DIRECTORY; otherwise places it in the kill ring."
+  (interactive)
+  (let* ((dir (or directory default-directory))
+         (result (fzf-async-consult-completing-read
+                  :directory dir
+                  :resolve-paths nil)))
+    (when result
+      (let ((path (expand-file-name result dir)))
+        (if (file-exists-p path)
+            (find-file path)
+          (kill-new result)
+          (message "%s" result))))))
+
+;;;###autoload
+(defun fzf-async-project-consult ()
+  "Like `fzf-async-consult' but run in the project root."
+  (interactive)
+  (fzf-async-consult (fzf-async--default-dir)))
+
+;;;###autoload
+(defun fzf-async-consult-rg (&optional directory)
+  "Consult-style ripgrep search in one minibuffer prompt.
+The minibuffer is pre-populated with `rg ...\"\"' and point lands
+between the empty quotes — type to edit rg's pattern, then type after
+the `#' delimiter to fzf-filter the streaming output.  Selecting a
+candidate opens the file at the matched line.
+
+DIRECTORY defaults to `default-directory'."
+  (interactive)
+  (let* ((dir (or directory default-directory))
+         (cmd (format "rg --line-number --no-heading --with-filename %s \"\""
+                      (fzf-async--max-columns-flag 'rg)))
+         (initial (concat "#" cmd "#"))
+         (cursor-pos (- (length initial) 2))
+         (result (fzf-async-consult-completing-read
+                  :directory dir
+                  :group #'fzf-async--grep-group
+                  :initial-input (cons initial cursor-pos)
+                  :resolve-paths t)))
+    (when (and result
+               (string-match "\\(.*\\):\\([0-9]+\\):" result))
+      (let ((file (match-string 1 result))
+            (line (string-to-number (match-string 2 result))))
+        (find-file file)
+        (goto-char (point-min))
+        (forward-line (1- line))))))
+
+;;;###autoload
+(defun fzf-async-project-consult-rg ()
+  "Like `fzf-async-consult-rg' but run in the project root."
+  (interactive)
+  (fzf-async-consult-rg (fzf-async--default-dir)))
+
 ;;; Setup
 
 (defconst fzf-async--commands
   '(fzf-async-shell-command
     fzf-async-project-shell-command
+    fzf-async-consult
+    fzf-async-project-consult
+    fzf-async-consult-rg
+    fzf-async-project-consult-rg
     fzf-async-find
     fzf-async-fd
     fzf-async-rg-files
@@ -1810,6 +2157,8 @@ Call `fzf-async-setup' before using fzf-async commands")))
                '(fzf-async-buffer (styles fzf-async)))
   (add-to-list 'completion-category-overrides
                '(fzf-async-multi (styles fzf-async)))
+  (add-to-list 'completion-category-overrides
+               '(fzf-async-consult (styles fzf-async)))
 
   (dolist (command fzf-async--commands)
     (advice-add command :before #'fzf-async--check-completion-setup)
