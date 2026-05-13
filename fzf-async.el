@@ -1782,11 +1782,6 @@ descend from A may exclude files the user expects to search."
               (push host hosts))))))
     (nreverse hosts)))
 
-(defun fzf-async--require-executable (program)
-  "Signal `user-error' if PROGRAM is not found in `exec-path'."
-  (unless (executable-find program)
-    (user-error "%s not found in exec-path" program)))
-
 ;;; Shell command
 
 (defvar fzf-async-shell-command-history nil
