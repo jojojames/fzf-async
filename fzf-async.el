@@ -471,96 +471,96 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
       (sit-for fzf-async-refresh-delay)
       (fzf-async--maybe-expand
        (unwind-protect
-          (minibuffer-with-setup-hook
-              (lambda ()
-                ;; case-mode and other defcustoms are bridged onto the
-                ;; canonical fzf-native names by :around advice on
-                ;; `fzf-native-async-candidates' (see EOF), so no
-                ;; setq-local needed here for the async path.
-                (when (boundp 'vertico-count-format)
-                  (setq-local vertico-count-format nil))
-                (when (boundp 'icomplete-matches-format)
-                  (setq-local icomplete-matches-format nil)))
-            (let ((ivy-completing-read-dynamic-collection t)
-                  (ivy-count-format
-                   (when (bound-and-true-p ivy-mode) ""))
-                  (ivy-pre-prompt-function
-                   (when (bound-and-true-p ivy-mode)
-                     (lambda ()
-                       (let ((idx (fzf-async--frontend-index)))
-                         (if idx
-                             (format "%s %d/[%s](%s) "
-                                     dir (1+ idx)
-                                     (fzf-async--commas last-filtered)
-                                     (fzf-async--commas last-total))
-                           (format "%s [%s](%s) "
-                                   dir
-                                   (fzf-async--commas last-filtered)
-                                   (fzf-async--commas last-total))))))))
-              (completing-read
-               prompt
-               (lambda (str _pred action)
-                 (pcase action
-                   ('metadata `(metadata (category . fzf-async)
-                                         (display-sort-function . identity)
-                                         (cycle-sort-function . identity)
-                                         ,@(when group `((group-function . ,group)))))
-                   ;; Treat the whole input as one field; prevents space-splitting.
-                   (`(boundaries . ,_) (cons 0 0))
-                   ('t (let* (;; Str is sometimes empty when there's a valid query.
-                              ;; Prefer str when non-empty to avoid calculations
-                              ;; in the minibuffer but fall back if str is empty.
-                              (query (if (not (string-empty-p str))
-                                         str
-                                       (when-let* ((win (active-minibuffer-window)))
-                                         (with-current-buffer (window-buffer win)
-                                           (minibuffer-contents-no-properties))))))
-                         (if (null query)
-                             last-result
-                           (let ((r (while-no-input
-                                      (fzf-native-async-candidates handle query limit))))
-                             (if (eq r t)
-                                 ;; Scoring was interrupted by pending input.
-                                 ;; Debounce a retry so the display self-heals once
-                                 ;; the user pauses typing.
-                                 (progn
-                                   (when retry-timer (cancel-timer retry-timer))
-                                   (setq retry-timer
-                                         (run-with-idle-timer
-                                          fzf-async-input-debounce nil
-                                          (lambda ()
-                                            (setq retry-timer nil)
-                                            (if (bound-and-true-p ivy-mode)
-                                                (funcall ivy-push)
-                                              (fzf-async--frontend-exhibit))))))
-                               (when-let* ((stats (fzf-native-async-stats handle)))
-                                 (setq last-filtered (car stats)
-                                       last-total    (cdr stats)))
-                               (unless (bound-and-true-p ivy-mode)
-                                 (when-let* ((win (active-minibuffer-window)))
-                                   (with-selected-window win
-                                     (unless stats-overlay
-                                       (setq stats-overlay
-                                             (make-overlay (point-min) (minibuffer-prompt-end))))
-                                     (funcall refresh-overlay))))
-                               (setq last-query query
-                                     last-result r))
-                             (when (equal query last-query) last-result)))))
-                   (_ t))))))
-        (cancel-timer timer)
-        (when retry-timer (cancel-timer retry-timer))
-        (remove-hook 'post-command-hook refresh-overlay)
-        (when stats-overlay (delete-overlay stats-overlay))
-        ;; Defer `fzf-native-async-stop' off the synchronous unwind path.
-        ;; The C-side destroy does pthread_join on the scoring thread
-        ;; (uninterruptible snapshot/score work for huge pools) and frees
-        ;; the candidate arena — easily hundreds of ms for a `find ~'-scale
-        ;; session.  None of it is needed before minibuffer dismissal, so
-        ;; we let the user see ESC return instantly and clean up on the
-        ;; next idle tick.
-        (when handle
-          (let ((h handle))
-            (run-at-time 0 nil (lambda () (fzf-native-async-stop h))))))
+           (minibuffer-with-setup-hook
+               (lambda ()
+                 ;; case-mode and other defcustoms are bridged onto the
+                 ;; canonical fzf-native names by :around advice on
+                 ;; `fzf-native-async-candidates' (see EOF), so no
+                 ;; setq-local needed here for the async path.
+                 (when (boundp 'vertico-count-format)
+                   (setq-local vertico-count-format nil))
+                 (when (boundp 'icomplete-matches-format)
+                   (setq-local icomplete-matches-format nil)))
+             (let ((ivy-completing-read-dynamic-collection t)
+                   (ivy-count-format
+                    (when (bound-and-true-p ivy-mode) ""))
+                   (ivy-pre-prompt-function
+                    (when (bound-and-true-p ivy-mode)
+                      (lambda ()
+                        (let ((idx (fzf-async--frontend-index)))
+                          (if idx
+                              (format "%s %d/[%s](%s) "
+                                      dir (1+ idx)
+                                      (fzf-async--commas last-filtered)
+                                      (fzf-async--commas last-total))
+                            (format "%s [%s](%s) "
+                                    dir
+                                    (fzf-async--commas last-filtered)
+                                    (fzf-async--commas last-total))))))))
+               (completing-read
+                prompt
+                (lambda (str _pred action)
+                  (pcase action
+                    ('metadata `(metadata (category . fzf-async)
+                                          (display-sort-function . identity)
+                                          (cycle-sort-function . identity)
+                                          ,@(when group `((group-function . ,group)))))
+                    ;; Treat the whole input as one field; prevents space-splitting.
+                    (`(boundaries . ,_) (cons 0 0))
+                    ('t (let* (;; Str is sometimes empty when there's a valid query.
+                               ;; Prefer str when non-empty to avoid calculations
+                               ;; in the minibuffer but fall back if str is empty.
+                               (query (if (not (string-empty-p str))
+                                          str
+                                        (when-let* ((win (active-minibuffer-window)))
+                                          (with-current-buffer (window-buffer win)
+                                            (minibuffer-contents-no-properties))))))
+                          (if (null query)
+                              last-result
+                            (let ((r (while-no-input
+                                       (fzf-native-async-candidates handle query limit))))
+                              (if (eq r t)
+                                  ;; Scoring was interrupted by pending input.
+                                  ;; Debounce a retry so the display self-heals once
+                                  ;; the user pauses typing.
+                                  (progn
+                                    (when retry-timer (cancel-timer retry-timer))
+                                    (setq retry-timer
+                                          (run-with-idle-timer
+                                           fzf-async-input-debounce nil
+                                           (lambda ()
+                                             (setq retry-timer nil)
+                                             (if (bound-and-true-p ivy-mode)
+                                                 (funcall ivy-push)
+                                               (fzf-async--frontend-exhibit))))))
+                                (when-let* ((stats (fzf-native-async-stats handle)))
+                                  (setq last-filtered (car stats)
+                                        last-total    (cdr stats)))
+                                (unless (bound-and-true-p ivy-mode)
+                                  (when-let* ((win (active-minibuffer-window)))
+                                    (with-selected-window win
+                                      (unless stats-overlay
+                                        (setq stats-overlay
+                                              (make-overlay (point-min) (minibuffer-prompt-end))))
+                                      (funcall refresh-overlay))))
+                                (setq last-query query
+                                      last-result r))
+                              (when (equal query last-query) last-result)))))
+                    (_ t))))))
+         (cancel-timer timer)
+         (when retry-timer (cancel-timer retry-timer))
+         (remove-hook 'post-command-hook refresh-overlay)
+         (when stats-overlay (delete-overlay stats-overlay))
+         ;; Defer `fzf-native-async-stop' off the synchronous unwind path.
+         ;; The C-side destroy does pthread_join on the scoring thread
+         ;; (uninterruptible snapshot/score work for huge pools) and frees
+         ;; the candidate arena — easily hundreds of ms for a `find ~'-scale
+         ;; session.  None of it is needed before minibuffer dismissal, so
+         ;; we let the user see ESC return instantly and clean up on the
+         ;; next idle tick.
+         (when handle
+           (let ((h handle))
+             (run-at-time 0 nil (lambda () (fzf-native-async-stop h))))))
        directory resolve-paths))))
 
 (cl-defun fzf-sync-completing-read (&key
