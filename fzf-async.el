@@ -75,8 +75,7 @@ has no effect (the check is macro-expanded at load time, like #ifdef).")
 (defmacro fzf-async--log (fmt &rest args)
   "Emit a debug message if `fzf-async-debug' is non-nil at load time.
 Expands to nothing when disabled — zero runtime cost."
-  (when (bound-and-true-p fzf-async-debug)
-    `(message ,fmt ,@args)))
+  (when (bound-and-true-p fzf-async-debug) `(message ,fmt ,@args)))
 
 ;;; Customization
 
@@ -1051,16 +1050,14 @@ reader-side cap still runs as a backstop."
 (defun fzf-async-find ()
   "Find a file under `default-directory' using find."
   (interactive)
-  (when-let* ((result (fzf-async-completing-read
-                       :command "find .")))
+  (when-let* ((result (fzf-async-completing-read :command "find .")))
     (find-file result)))
 
 ;;;###autoload
 (defun fzf-async-fd ()
   "Find a file under `default-directory' using fd."
   (interactive)
-  (when-let* ((result (fzf-async-completing-read
-                       :command "fd --no-ignore")))
+  (when-let* ((result (fzf-async-completing-read :command "fd --no-ignore")))
     (find-file result)))
 
 ;;;###autoload
@@ -1068,8 +1065,7 @@ reader-side cap still runs as a backstop."
   "Find a file under `default-directory' using rg --files."
   (interactive)
   (when-let* ((result (fzf-async-completing-read
-                       :prompt "rg files: "
-                       :command "rg --files")))
+                       :prompt "rg files: " :command "rg --files")))
     (find-file result)))
 
 ;;;###autoload
@@ -1077,8 +1073,7 @@ reader-side cap still runs as a backstop."
   "Find a file under `default-directory' using ag."
   (interactive)
   (when-let* ((result (fzf-async-completing-read
-                       :prompt "ag files: "
-                       :command "ag -g .")))
+                       :prompt "ag files: " :command "ag -g .")))
     (find-file result)))
 
 ;;;###autoload
@@ -1089,8 +1084,9 @@ Streams all file contents as FILE:LINE:CONTENT; type to
 Selecting a candidate opens the file at that line."
   (interactive)
   (when-let* ((r (fzf-async-completing-read
-                  :command (format "rg --line-number --no-heading --with-filename %s ''"
-                                   (fzf-async--max-columns-flag 'rg))
+                  :command (format
+                            "rg --line-number --no-heading --with-filename %s ''"
+                            (fzf-async--max-columns-flag 'rg))
                   :group #'fzf-async--grep-group))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
@@ -1107,8 +1103,9 @@ Streams all file contents as FILE:LINE:CONTENT; type to
 Selecting a candidate opens the file at that line."
   (interactive)
   (when-let* ((r (fzf-async-completing-read
-                  :command (format "ag --nocolor --nogroup --line-number %s \".\""
-                                   (fzf-async--max-columns-flag 'ag))
+                  :command (format
+                            "ag --nocolor --nogroup --line-number %s \".\""
+                            (fzf-async--max-columns-flag 'ag))
                   :group #'fzf-async--grep-group))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
@@ -1398,8 +1395,7 @@ when the command was invoked.  Selecting \"default\" disables all themes."
 (defun fzf-async-locate ()
   "Find a file system-wide using locate."
   (interactive)
-  (when-let* ((result (fzf-async-completing-read
-                       :command "locate ''")))
+  (when-let* ((result (fzf-async-completing-read :command "locate ''")))
     (find-file result)))
 
 ;;;###autoload
