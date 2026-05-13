@@ -136,24 +136,19 @@ truncated before entering the candidate pool, so scoring never
 sees the excess characters.
 
 For the rg / ag / ugrep grep-style commands the cap is also pushed
-upstream into the search tool itself (via `--max-columns' / `--width'),
-so long lines never traverse the pipe in the first place — saves
-IPC bandwidth and avoids work in the search tool on minified files,
-base64 blobs, and other pathological inputs."
+upstream into the search tool itself (via `--max-columns' / `--width')."
   :type '(choice (const   :tag "No limit" nil)
                  (integer :tag "N (positive = exclude, negative = truncate)"))
   :group 'fzf-async)
 
 (defcustom fzf-async-case-mode 'smart
   "Case-sensitivity mode propagated to `fzf-native-case-mode'.
+
 Mirrors fzf-native's enum:
 smart    Case-insensitive when the query is all lowercase; case-sensitive
          once it contains any uppercase character (fzf's default).
 ignore   Always case-insensitive.
-respect  Always case-sensitive.
-
-Applied via `setq-local' inside each fzf-async completing-read function
-so the C scorer sees the chosen mode for the duration of the session."
+respect  Always case-sensitive."
   :type '(choice (const :tag "Smart case (default)" smart)
                  (const :tag "Ignore case"          ignore)
                  (const :tag "Respect case"         respect))
@@ -197,8 +192,7 @@ Priority: `fzf-async-directory' > project backend > `default-directory'.")
 project    Use `project.el' to find the project root (default, matches consult).
 projectile Use `projectile-project-root'.
 nil        Use `default-directory' (no project detection).
-function   Call the function with no arguments;
- it should return a directory string."
+function   Call the function with no arguments; Returns a directory string."
   :type '(choice (const :tag "project.el" project)
                  (const :tag "Projectile" projectile)
                  (const :tag "None (default-directory)" nil)
@@ -238,9 +232,7 @@ Returns nil for frontends that do not expose a selection index (e.g. icomplete).
 
 (defun fzf-async--frontend-exhibit ()
   "Trigger a display refresh in the active completion UI.
-Handles vertico and icomplete.  Ivy's push path is handled separately
-via the `ivy-push' closure in `fzf-async-completing-read': calling
-`ivy--exhibit' alone re-renders stale candidates without re-scoring."
+Handles vertico and icomplete. `ivy' is handled separately."
   (when-let* ((win (active-minibuffer-window)))
     (with-selected-window win
       (cond
@@ -251,7 +243,9 @@ via the `ivy-push' closure in `fzf-async-completing-read': calling
         (icomplete-exhibit))))))
 
 (defun fzf-async--commas (n)
-  "Format integer N with comma thousand-separators (e.g., 1234567 → \"1,234,567\")."
+  "Format integer N with comma thousand-separators.
+
+e.g., 1234567 → 1,234,567."
   (let ((s (number-to-string n))
         (out ""))
     (while (> (length s) 3)
@@ -327,6 +321,7 @@ Returns the selected candidate string, or nil on cancel."
 
 (defun fzf-async--maybe-expand (result directory resolve-paths)
   "Return RESULT expanded against DIRECTORY when RESOLVE-PATHS is non-nil.
+
 For RESOLVE-PATHS=t the whole RESULT is passed through `expand-file-name'
 — this works for both plain paths and FILE:LINE:CONTENT grep candidates,
 since `expand-file-name' prepends DIRECTORY and leaves the suffix
@@ -422,15 +417,17 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
                                            prompt dir
                                            (fzf-async--commas last-filtered)
                                            (fzf-async--commas last-total)))))))))
-           ;; Ivy push path: score the current query and push into ivy--all-candidates
-           ;; directly.  Used instead of fzf-async--frontend-exhibit for ivy because
+           ;; Ivy push path: score the current query and push into
+           ;; `ivy--all-candidates' directly. Used instead of
+           ;; `fzf-async--frontend-exhibit' for ivy because
            ;; ivy does not re-call the collection lambda on timer ticks.
            (ivy-push
             (lambda ()
               (when (and handle (active-minibuffer-window))
                 (when-let* ((query (and (boundp 'ivy-text) ivy-text)))
                   (let ((cands (while-no-input
-                                 (fzf-native-async-candidates handle query limit))))
+                                 (fzf-native-async-candidates
+                                  handle query limit))))
                     (when (and cands (not (eq cands t)))
                       (when-let* ((stats (fzf-native-async-stats handle)))
                         (setq last-filtered (car stats)
@@ -1774,13 +1771,7 @@ via `completion-category-overrides' only"))
 Call `fzf-async-setup' before using fzf-async commands")))
 
 (defun fzf-async--bridge-defcustoms (orig-fn &rest args)
-  "Wrap a fzf-native call so the C scorer sees fzf-async-* values.
-
-Bridges four knobs:
-  `fzf-async-highlight'       -> `fzf-native-async-highlight'
-  `fzf-async-max-line-length' -> `fzf-native-max-line-length'
-  `fzf-async-cache-size'      -> `fzf-native-async-cache-size'
-  `fzf-async-case-mode'       -> `fzf-native-case-mode'"
+  "Wrap a fzf-native call so the C scorer sees fzf-async-* values."
   (let ((fzf-native-async-highlight  fzf-async-highlight)
         (fzf-native-max-line-length  fzf-async-max-line-length)
         (fzf-native-async-cache-size fzf-async-cache-size)
@@ -1789,8 +1780,7 @@ Bridges four knobs:
 
 ;;;###autoload
 (defun fzf-async-setup ()
-  "Register the fzf-async completion style and category override.
-Call this once during init before using `fzf-async-completing-read'."
+  "Register the fzf-async completion style and category override."
   (add-to-list 'completion-styles-alist
                '(fzf-async fzf-async-try-completion fzf-async-all-completions
                            "Passthrough style for pre-scored async fzf completions."))
