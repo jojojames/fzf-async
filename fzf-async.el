@@ -392,6 +392,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
       (cl-return-from fzf-async-completing-read
         (fzf-async--maybe-expand (cdr fzf-async--multi-mode)
                                  directory resolve-paths))))
+    (fzf-async--check-completion-setup)
     (when (bound-and-true-p helm-mode)
       (cl-return-from fzf-async-completing-read
         (fzf-async--maybe-expand
@@ -599,6 +600,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
    ((eq (car-safe fzf-async--multi-mode) :inject)
     (cl-return-from fzf-sync-completing-read
       (cdr fzf-async--multi-mode))))
+  (fzf-async--check-completion-setup)
   (completing-read
    prompt
    (lambda (str _pred action)
@@ -1819,29 +1821,6 @@ Like `fzf-async-shell-command' but runs in the project root."
 
 ;;; Setup
 
-(defconst fzf-async--commands
-  '(fzf-async-shell-command
-    fzf-async-project-shell-command
-    fzf-async-find
-    fzf-async-fd
-    fzf-async-rg-files
-    fzf-async-ag-files
-    fzf-async-rg
-    fzf-async-ag
-    fzf-async-git-grep
-    fzf-async-grep
-    fzf-async-grep-current-file
-    fzf-async-ugrep
-    fzf-async-git-ls-files
-    fzf-async-hg-files
-    fzf-async-locate
-    fzf-async-spotlight
-    fzf-async-spotlight-apps
-    fzf-async-spotlight-audio
-    fzf-async-swiper-hungry
-    fzf-async-find-hungry)
-  "All fzf-async commands that use `fzf-async-completing-read'.")
-
 (defcustom fzf-async-file-commands
   '(fzf-async-find
     fzf-async-fd
@@ -1852,7 +1831,8 @@ Like `fzf-async-shell-command' but runs in the project root."
     fzf-async-locate
     fzf-async-spotlight
     fzf-async-spotlight-apps
-    fzf-async-spotlight-audio)
+    fzf-async-spotlight-audio
+    fzf-async-find-hungry)
   "fzf-async commands whose candidates are plain file paths.
 These are registered with marginalia under the `file' category so
 marginalia can annotate them with file size and modification time.
@@ -1861,7 +1841,7 @@ are registered under the `fzf-async' category and receive no annotation."
   :type '(repeat symbol)
   :group 'fzf-async)
 
-(defun fzf-async--check-completion-setup (&rest _)
+(defun fzf-async--check-completion-setup ()
   "Signal a user-error if the completion configuration is incorrect.
 Guards against two misconfiguration patterns:
 - `fzf-async' in the global `completion-styles' list, which applies the
@@ -1911,15 +1891,12 @@ Call `fzf-async-setup' before using fzf-async commands")))
   (add-to-list 'completion-category-overrides
                '(fzf-async-multi (styles fzf-async)))
 
-  (dolist (command fzf-async--commands)
-    (advice-add command :before #'fzf-async--check-completion-setup)
-    (with-eval-after-load 'embark
-      (add-to-list 'embark-keymap-alist
-                   `(,command . embark-file-map))))
-
   (with-eval-after-load 'embark
     (add-to-list 'embark-keymap-alist
-                 '(fzf-async-buffer . embark-buffer-map)))
+                 '(fzf-async-buffer . embark-buffer-map))
+    (dolist (command fzf-async-file-commands)
+      (add-to-list 'embark-keymap-alist
+                   `(,command . embark-file-map))))
 
   (with-eval-after-load 'marginalia
     ;; Register the file annotator for fzf-async-file so file commands still
@@ -1928,11 +1905,9 @@ Call `fzf-async-setup' before using fzf-async commands")))
                  '(fzf-async-file marginalia-annotate-file none))
     (add-to-list 'marginalia-annotators
                  '(fzf-async-buffer marginalia-annotate-buffer none))
-    (dolist (command fzf-async--commands)
+    (dolist (command fzf-async-file-commands)
       (add-to-list 'marginalia-command-categories
-                   `(,command . ,(if (memq command fzf-async-file-commands)
-                                     'fzf-async-file
-                                   'fzf-async))))))
+                   `(,command . fzf-async-file)))))
 
 (provide 'fzf-async)
 ;;; fzf-async.el ends here
