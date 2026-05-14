@@ -39,6 +39,8 @@
   :link '(url-link :tag "GitHub" "https://github.com/jojojames/fzf-async"))
 
 (defvar embark-keymap-alist)
+(defvar embark-default-action-overrides)
+(defvar embark-general-map)
 (defvar fzf-native-case-mode)
 (defvar fzf-native-async-highlight)
 (defvar fzf-native-max-line-length)
@@ -479,6 +481,12 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
        (unwind-protect
            (minibuffer-with-setup-hook
                (lambda ()
+                 ;; Bind the minibuffer's default-directory so that callers
+                 ;; running outside fzf-async (notably embark, which captures
+                 ;; default-directory and rebinds it around the action) resolve
+                 ;; relative candidates against the working directory the
+                 ;; command actually ran in.
+                 (setq-local default-directory directory)
                  ;; case-mode and other defcustoms are bridged onto the
                  ;; canonical fzf-native names by :around advice on
                  ;; `fzf-native-async-candidates' (see EOF), so no
@@ -1095,13 +1103,8 @@ Selecting a candidate opens the file at that line."
                             "rg --line-number --no-heading --with-filename %s ''"
                             (fzf-async--max-columns-flag 'rg))
                   :category 'fzf-async-grep
-                  :group #'fzf-async--grep-group))
-              (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
-              (file (match-string 1 r))
-              (line (string-to-number (match-string 2 r))))
-    (find-file file)
-    (goto-char (point-min))
-    (forward-line (1- line))))
+                  :group #'fzf-async--grep-group)))
+    (fzf-async--grep-jump r)))
 
 ;;;###autoload
 (defun fzf-async-ag ()
@@ -1115,13 +1118,8 @@ Selecting a candidate opens the file at that line."
                             "ag --nocolor --nogroup --line-number %s \".\""
                             (fzf-async--max-columns-flag 'ag))
                   :category 'fzf-async-grep
-                  :group #'fzf-async--grep-group))
-              (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
-              (file (match-string 1 r))
-              (line (string-to-number (match-string 2 r))))
-    (find-file file)
-    (goto-char (point-min))
-    (forward-line (1- line))))
+                  :group #'fzf-async--grep-group)))
+    (fzf-async--grep-jump r)))
 
 ;;;###autoload
 (defun fzf-async-git-grep ()
@@ -1135,13 +1133,8 @@ Selecting a candidate opens the file at that line."
   (when-let* ((r (fzf-async-completing-read
                   :command "git --no-pager grep -n \"\""
                   :category 'fzf-async-grep
-                  :group #'fzf-async--grep-group))
-              (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
-              (file (match-string 1 r))
-              (line (string-to-number (match-string 2 r))))
-    (find-file file)
-    (goto-char (point-min))
-    (forward-line (1- line))))
+                  :group #'fzf-async--grep-group)))
+    (fzf-async--grep-jump r)))
 
 ;;;###autoload
 (defun fzf-async-grep ()
@@ -1153,30 +1146,22 @@ Selecting a candidate opens the file at that line."
   (when-let* ((r (fzf-async-completing-read
                   :command "grep -Rn ''"
                   :category 'fzf-async-grep
-                  :group #'fzf-async--grep-group))
-              (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
-              (file (match-string 1 r))
-              (line (string-to-number (match-string 2 r))))
-    (find-file file)
-    (goto-char (point-min))
-    (forward-line (1- line))))
+                  :group #'fzf-async--grep-group)))
+    (fzf-async--grep-jump r)))
 
 ;;;###autoload
 (defun fzf-async-grep-current-file ()
   "Search the current buffer's file with grep.
-Streams non-blank lines as LINE:CONTENT; type to fuzzy-filter across them.
+Streams non-blank lines as FILE:LINE:CONTENT; type to fuzzy-filter across them.
 Selecting a candidate jumps to that line in the file."
   (interactive)
-  (when-let* ((bf buffer-file-name) ;; Track buffer.
-              (r (fzf-async-completing-read
-                  :command (format "grep -vn '^[[:space:]]*$' %s"
+  (unless buffer-file-name
+    (user-error "Buffer is not visiting a file"))
+  (when-let* ((r (fzf-async-completing-read
+                  :command (format "grep -vnH '^[[:space:]]*$' %s"
                                    (shell-quote-argument buffer-file-name))
-                  :category 'fzf-async-grep))
-              (match (string-match "^\\([0-9]+\\):\\(.*\\)$" r))
-              (line (string-to-number (match-string 1 r))))
-    (find-file bf) ;; In case they swapped windows.
-    (goto-char (point-min))
-    (forward-line (1- line))))
+                  :category 'fzf-async-grep)))
+    (fzf-async--grep-jump r)))
 
 ;;;###autoload
 (defun fzf-async-ugrep ()
@@ -1190,13 +1175,8 @@ Selecting a candidate opens the file at that line."
                   :command (format "ugrep -RIn --no-heading %s ''"
                                    (fzf-async--max-columns-flag 'ugrep))
                   :category 'fzf-async-grep
-                  :group #'fzf-async--grep-group))
-              (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
-              (file (match-string 1 r))
-              (line (string-to-number (match-string 2 r))))
-    (find-file file)
-    (goto-char (point-min))
-    (forward-line (1- line))))
+                  :group #'fzf-async--grep-group)))
+    (fzf-async--grep-jump r)))
 
 ;;;###autoload
 (defun fzf-async-git-ls-files ()
@@ -1485,86 +1465,63 @@ Constrained to `fzf-async-spotlight-audio-directories'."
 (defun fzf-async-swiper ()
   "Search lines of the current buffer using fzf."
   (interactive)
-  (let* ((buffer (current-buffer))
+  (let* ((source (or (buffer-file-name) (buffer-name)))
          (candidates
-          (with-current-buffer buffer
-            (let (lines)
-              (save-excursion
-                (goto-char (point-min))
-                (let ((i 1))
-                  (while (not (eobp))
-                    (let ((content (buffer-substring-no-properties
-                                    (line-beginning-position)
-                                    (line-end-position))))
-                      (unless (string-empty-p content)
-                        (push (format "%d:%s" i content) lines)))
-                    (forward-line 1)
-                    (cl-incf i))))
-              (nreverse lines)))))
+          (let (lines)
+            (save-excursion
+              (goto-char (point-min))
+              (let ((i 1))
+                (while (not (eobp))
+                  (let ((content (buffer-substring-no-properties
+                                  (line-beginning-position)
+                                  (line-end-position))))
+                    (unless (string-empty-p content)
+                      (push (format "%s:%d:%s" source i content) lines)))
+                  (forward-line 1)
+                  (cl-incf i))))
+            (nreverse lines))))
     (when-let* ((r (fzf-sync-completing-read :candidates candidates :prompt "swiper: "
-                                              :category 'fzf-async-grep))
-                (match (string-match "^\\([0-9]+\\):" r))
-                (line (string-to-number (match-string 1 r))))
-      (switch-to-buffer buffer)
-      (goto-char (point-min))
-      (forward-line (1- line)))))
+                                             :category 'fzf-async-grep)))
+      (fzf-async--grep-jump r))))
 
 ;;;###autoload
 (defun fzf-async-swiper-all ()
-  "Search lines across all open buffers using fzf."
+  "Search lines across all open buffers using fzf.
+Candidates are formatted as SOURCE:LINE:CONTENT where SOURCE is the
+buffer's file path when file-backed, else its buffer name.  Buffer
+names containing `:DIGITS:' substrings are not encoded specially and
+may parse ambiguously — a rare-enough hazard to accept."
   (interactive)
-  (cl-labels ((sanitize (name)
-                (replace-regexp-in-string "[/\\*?<>|: ]" "-" name)))
-    (let* ((buffers (cl-remove-if
-                     (lambda (b)
-                       (or (minibufferp b)
-                           (string-prefix-p " " (buffer-name b))))
-                     (buffer-list)))
-           (buf-vec (vconcat buffers))
-           (candidates
-            (cl-loop for buf across buf-vec
-                     for i from 0
-                     for pfx = (format "%d-%s" i (sanitize (buffer-name buf)))
-                     append (with-current-buffer buf
-                              (let (lines)
-                                (save-excursion
-                                  (goto-char (point-min))
-                                  (let ((j 1))
-                                    (while (not (eobp))
-                                      (let ((content
-                                             (buffer-substring-no-properties
-                                              (line-beginning-position)
-                                              (line-end-position))))
-                                        (unless (string-empty-p content)
-                                          (push (format "%s:%d:%s" pfx j content)
-                                                lines)))
-                                      (forward-line 1)
-                                      (cl-incf j))))
-                                (nreverse lines))))))
-      (when-let* ((r (fzf-sync-completing-read
-                      :candidates candidates
-                      :prompt "swiper-all: "
-                      :category 'fzf-async-grep
-                      :group (lambda (cand transform)
-                               ;; Candidates: "IDX-BUFNAME:LINE:CONTENT"
-                               (if transform
-                                   ;; Display: strip "IDX-BUFNAME:" prefix
-                                   (when (string-match "^[^:]+:\\(.*\\)$" cand)
-                                     (match-string 1 cand))
-                                 ;; Group header: actual buffer name from index
-                                 (when (string-match "^\\([0-9]+\\)-" cand)
-                                   (let ((i (string-to-number (match-string 1 cand))))
-                                     (when (< i (length buf-vec))
-                                       (buffer-name (aref buf-vec i)))))))))
-                  (match (string-match "^\\([0-9]+\\)-[^:]*:\\([0-9]+\\):" r))
-                  (idx (string-to-number (match-string 1 r)))
-                  (line (string-to-number (match-string 2 r)))
-                  ((< idx (length buf-vec)))
-                  (buffer (aref buf-vec idx))
-                  ((buffer-live-p buffer)))
-        (switch-to-buffer buffer)
-        (goto-char (point-min))
-        (forward-line (1- line))))))
+  (let* ((buffers (cl-remove-if
+                   (lambda (b)
+                     (or (minibufferp b)
+                         (string-prefix-p " " (buffer-name b))))
+                   (buffer-list)))
+         (candidates
+          (cl-loop
+           for buf in buffers
+           for source = (or (buffer-file-name buf) (buffer-name buf))
+           append (with-current-buffer buf
+                    (let (lines)
+                      (save-excursion
+                        (goto-char (point-min))
+                        (let ((j 1))
+                          (while (not (eobp))
+                            (let ((content (buffer-substring-no-properties
+                                            (line-beginning-position)
+                                            (line-end-position))))
+                              (unless (string-empty-p content)
+                                (push (format "%s:%d:%s" source j content)
+                                      lines)))
+                            (forward-line 1)
+                            (cl-incf j))))
+                      (nreverse lines))))))
+    (when-let* ((r (fzf-sync-completing-read
+                    :candidates candidates
+                    :prompt "swiper-all: "
+                    :category 'fzf-async-grep
+                    :group #'fzf-async--grep-group)))
+      (fzf-async--grep-jump r))))
 
 (defun fzf-async--imenu (scope)
   "Implementation of `fzf-async-imenu' / `fzf-async-imenu-all'.
@@ -1712,13 +1669,8 @@ Selecting a match opens the file and jumps to the line."
                       :command command
                       :directory default-directory
                       :category 'fzf-async-grep
-                      :group #'fzf-async--grep-group))
-                  (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
-                  (file (match-string 1 r))
-                  (line (string-to-number (match-string 2 r))))
-        (find-file file)
-        (goto-char (point-min))
-        (forward-line (1- line))))))
+                      :group #'fzf-async--grep-group)))
+        (fzf-async--grep-jump r)))))
 
 ;;;###autoload
 (defun fzf-async-find-hungry ()
@@ -1754,14 +1706,45 @@ by a shallower parent, then streams fd (or find) output through fzf."
 
 ;;; Helpers
 
+(defconst fzf-async--grep-line-regexp "\\`\\(.*?\\):\\([0-9]+\\):"
+  "Lazy parser for `fzf-async-grep' category candidates.
+Group 1 is SOURCE (file path or buffer name).  Group 2 is LINE.
+Lazy match anchors on the first `:DIGITS:' boundary so a colon-bearing
+buffer name does not corrupt the split.")
+
+(defun fzf-async--goto-source (source line)
+  "Open SOURCE and jump to LINE.
+SOURCE is a file path when `file-exists-p'; otherwise it is treated as
+a buffer name."
+  (cond
+   ((file-exists-p source) (find-file source))
+   ((get-buffer source)    (switch-to-buffer source))
+   (t (user-error "Source not found: %s" source)))
+  (goto-char (point-min))
+  (forward-line (1- line)))
+
+(defun fzf-async--grep-jump (cand)
+  "Open the SOURCE and jump to the LINE referenced by CAND.
+Used both by the grep commands' selected-candidate handling and by the
+embark default action for the `fzf-async-grep' category."
+  (when (string-match fzf-async--grep-line-regexp cand)
+    (fzf-async--goto-source
+     (match-string 1 cand)
+     (string-to-number (match-string 2 cand)))))
+
+(defvar-keymap fzf-async-grep-map
+  :doc "Embark keymap for `fzf-async-grep' candidates.
+Composed with `embark-general-map' via `embark-keymap-alist'.")
+
 (defun fzf-async--grep-group (cand transform)
   "Group function for FILE:LINE:CONTENT grep candidates.
 TRANSFORM nil  → return the filename as the section header.
 TRANSFORM non-nil → strip the filename prefix; display LINE:CONTENT only."
-  (let ((i (string-search ":" cand)))
-    (if transform
-        (if i (substring cand (1+ i)) cand)
-      (if i (substring cand 0 i) cand))))
+  (if (string-match fzf-async--grep-line-regexp cand)
+      (if transform
+          (substring cand (match-beginning 2))
+        (match-string 1 cand))
+    cand))
 
 (defun fzf-async--default-dir ()
   "Return the working directory for fzf-async commands.
@@ -1899,8 +1882,11 @@ Call `fzf-async-setup' before using fzf-async commands")))
   (with-eval-after-load 'embark
     (dolist (entry '((fzf-async-file     . embark-file-map)
                      (fzf-async-buffer   . embark-buffer-map)
-                     (fzf-async-bookmark . embark-bookmark-map)))
-      (add-to-list 'embark-keymap-alist entry)))
+                     (fzf-async-bookmark . embark-bookmark-map)
+                     (fzf-async-grep     fzf-async-grep-map embark-general-map)))
+      (add-to-list 'embark-keymap-alist entry))
+    (setf (alist-get 'fzf-async-grep embark-default-action-overrides)
+          #'fzf-async--grep-jump))
 
   (with-eval-after-load 'marginalia
     (dolist (entry '((fzf-async-file     marginalia-annotate-file     none)

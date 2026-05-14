@@ -162,25 +162,20 @@ Mocks `expand-file-name' so `fzf-async-tramp' reads the temp file."
     (should-error (fzf-async-test--extract #'fzf-async-tramp)
                   :type 'user-error)))
 
-;;; fzf-async-swiper-all (sanitize via :extract)
+;;; fzf-async-swiper-all (SOURCE encoding via :extract)
 
-(ert-deftest fzf-async-swiper-all-sanitizes-buffer-names ()
-  "Buffer-name characters /\\*?<>|: and space become hyphens in candidates."
+(ert-deftest fzf-async-swiper-all-emits-source-line-content ()
+  "Non-file buffers use the buffer name verbatim as the SOURCE field."
   (let ((buf (generate-new-buffer " *fzf-async-test-src*")))
     (unwind-protect
         (progn
           (with-current-buffer buf
-            (rename-buffer "test:buf with space/x" t)
+            (rename-buffer "fzf-async-test-buf" t)
             (insert "hello\n"))
           (cl-letf (((symbol-function 'buffer-list) (lambda () (list buf))))
             (let* ((args (fzf-async-test--extract #'fzf-async-swiper-all))
                    (cands (plist-get args :items)))
-              ;; Buffer name "test:buf with space/x" should sanitize to
-              ;; "test-buf-with-space-x"; candidate prefix is "0-<name>:".
-              (should (cl-some
-                       (lambda (c)
-                         (string-prefix-p "0-test-buf-with-space-x:" c))
-                       cands)))))
+              (should (member "fzf-async-test-buf:1:hello" cands)))))
       (kill-buffer buf))))
 
 (provide 'fzf-async-test)
