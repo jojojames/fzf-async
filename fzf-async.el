@@ -349,6 +349,7 @@ when RESOLVE-PATHS is nil."
                                      prompt
                                      command
                                      (directory (fzf-async--default-dir))
+                                     (category 'fzf-async-file)
                                      group
                                      (resolve-paths t)
                                      skip-executable-check)
@@ -360,6 +361,10 @@ when RESOLVE-PATHS is nil."
 :DIRECTORY              Working directory for COMMAND.  Defaults to
                         `fzf-async--default-dir' (respects
                         `fzf-async-project-backend').
+:CATEGORY               Completion category symbol.  Defaults to
+                        `fzf-async-file' (most async commands return file
+                        paths).  Pass `fzf-async-grep' for FILE:LINE:CONTENT
+                        candidates, `fzf-async-misc' for non-file output, etc.
 :RESOLVE-PATHS          When non-nil (the default), the returned
                         candidate is passed through `expand-file-name'
                         against :DIRECTORY before being handed back to the
@@ -386,7 +391,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
      ((eq fzf-async--multi-mode :extract)
       (throw 'fzf-async-extracted
              (list :prompt prompt :command command
-                   :directory directory :group group
+                   :directory directory :category category :group group
                    :resolve-paths resolve-paths)))
      ((eq (car-safe fzf-async--multi-mode) :inject)
       (cl-return-from fzf-async-completing-read
@@ -502,7 +507,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
                 prompt
                 (lambda (str _pred action)
                   (pcase action
-                    ('metadata `(metadata (category . fzf-async)
+                    ('metadata `(metadata (category . ,category)
                                           (display-sort-function . identity)
                                           (cycle-sort-function . identity)
                                           ,@(when group `((group-function . ,group)))))
@@ -567,7 +572,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
 (cl-defun fzf-sync-completing-read (&key
                                     candidates
                                     (prompt "fzf > ")
-                                    (category 'fzf-async)
+                                    (category 'fzf-async-misc)
                                     annotate
                                     affix
                                     group)
@@ -575,7 +580,7 @@ The prompt overlay shows: DIR IDX/[FILTERED](TOTAL)
 
 :CANDIDATES List of strings to score with `fzf-native-score-all'.
 :PROMPT     Minibuffer prompt string.  Defaults to \"fzf > \".
-:CATEGORY   Completion category symbol.  Defaults to `fzf-async'.
+:CATEGORY   Completion category symbol.  Defaults to `fzf-async-misc'.
             Use `fzf-async-file' for file-path candidates so marginalia
             can annotate them with file metadata.
 :ANNOTATE   Optional function (CANDIDATE) -> string appended after each
@@ -1089,6 +1094,7 @@ Selecting a candidate opens the file at that line."
                   :command (format
                             "rg --line-number --no-heading --with-filename %s ''"
                             (fzf-async--max-columns-flag 'rg))
+                  :category 'fzf-async-grep
                   :group #'fzf-async--grep-group))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
@@ -1108,6 +1114,7 @@ Selecting a candidate opens the file at that line."
                   :command (format
                             "ag --nocolor --nogroup --line-number %s \".\""
                             (fzf-async--max-columns-flag 'ag))
+                  :category 'fzf-async-grep
                   :group #'fzf-async--grep-group))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
@@ -1127,6 +1134,7 @@ Selecting a candidate opens the file at that line."
     (error "Not a Git repo"))
   (when-let* ((r (fzf-async-completing-read
                   :command "git --no-pager grep -n \"\""
+                  :category 'fzf-async-grep
                   :group #'fzf-async--grep-group))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
@@ -1144,6 +1152,7 @@ Selecting a candidate opens the file at that line."
   (interactive)
   (when-let* ((r (fzf-async-completing-read
                   :command "grep -Rn ''"
+                  :category 'fzf-async-grep
                   :group #'fzf-async--grep-group))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
@@ -1161,7 +1170,8 @@ Selecting a candidate jumps to that line in the file."
   (when-let* ((bf buffer-file-name) ;; Track buffer.
               (r (fzf-async-completing-read
                   :command (format "grep -vn '^[[:space:]]*$' %s"
-                                   (shell-quote-argument buffer-file-name))))
+                                   (shell-quote-argument buffer-file-name))
+                  :category 'fzf-async-grep))
               (match (string-match "^\\([0-9]+\\):\\(.*\\)$" r))
               (line (string-to-number (match-string 1 r))))
     (find-file bf) ;; In case they swapped windows.
@@ -1179,6 +1189,7 @@ Selecting a candidate opens the file at that line."
   (when-let* ((r (fzf-async-completing-read
                   :command (format "ugrep -RIn --no-heading %s ''"
                                    (fzf-async--max-columns-flag 'ugrep))
+                  :category 'fzf-async-grep
                   :group #'fzf-async--grep-group))
               (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
               (file (match-string 1 r))
@@ -1351,7 +1362,8 @@ kill ring instead.  Override the location via
     (unless names
       (user-error "No bookmarks defined"))
     (when-let* ((result (fzf-sync-completing-read
-                         :candidates names :prompt "bookmark: ")))
+                         :candidates names :prompt "bookmark: "
+                         :category 'fzf-async-bookmark)))
       (bookmark-jump result))))
 
 ;;;###autoload
@@ -1387,7 +1399,8 @@ when the command was invoked.  Selecting \"default\" disables all themes."
                    :candidates (cons "default"
                                      (mapcar #'symbol-name
                                              (custom-available-themes)))
-                   :prompt "theme: ")))
+                   :prompt "theme: "
+                   :category 'fzf-async-theme)))
         (if selection
             (switch (and (not (equal selection "default")) (intern selection)))
           (mapc #'disable-theme custom-enabled-themes)
@@ -1488,7 +1501,8 @@ Constrained to `fzf-async-spotlight-audio-directories'."
                     (forward-line 1)
                     (cl-incf i))))
               (nreverse lines)))))
-    (when-let* ((r (fzf-sync-completing-read :candidates candidates :prompt "swiper: "))
+    (when-let* ((r (fzf-sync-completing-read :candidates candidates :prompt "swiper: "
+                                              :category 'fzf-async-grep))
                 (match (string-match "^\\([0-9]+\\):" r))
                 (line (string-to-number (match-string 1 r))))
       (switch-to-buffer buffer)
@@ -1530,6 +1544,7 @@ Constrained to `fzf-async-spotlight-audio-directories'."
       (when-let* ((r (fzf-sync-completing-read
                       :candidates candidates
                       :prompt "swiper-all: "
+                      :category 'fzf-async-grep
                       :group (lambda (cand transform)
                                ;; Candidates: "IDX-BUFNAME:LINE:CONTENT"
                                (if transform
@@ -1618,6 +1633,7 @@ Display differences:
                             ('all    "imenu-all: ")
                             ('others "imenu-others: ")
                             (_       "imenu: "))
+                  :category 'fzf-async-imenu
                   :group
                   (lambda (cand transform)
                     (cond
@@ -1695,6 +1711,7 @@ Selecting a match opens the file and jumps to the line."
                       :prompt "hungry swiper: "
                       :command command
                       :directory default-directory
+                      :category 'fzf-async-grep
                       :group #'fzf-async--grep-group))
                   (match (string-match "\\(.*\\):\\([0-9]+\\):" r))
                   (file (match-string 1 r))
@@ -1802,6 +1819,7 @@ directory; otherwise it is placed in the kill ring."
                          :prompt (format "%s » " cmd)
                          :command cmd
                          :directory dir
+                         :category 'fzf-async-misc
                          :resolve-paths nil
                          :skip-executable-check t)))
       (let ((path (expand-file-name result dir)))
@@ -1821,43 +1839,37 @@ Like `fzf-async-shell-command' but runs in the project root."
 
 ;;; Setup
 
-(defcustom fzf-async-file-commands
-  '(fzf-async-find
-    fzf-async-fd
-    fzf-async-rg-files
-    fzf-async-ag-files
-    fzf-async-git-ls-files
-    fzf-async-hg-files
-    fzf-async-locate
-    fzf-async-spotlight
-    fzf-async-spotlight-apps
-    fzf-async-spotlight-audio
-    fzf-async-find-hungry)
-  "fzf-async commands whose candidates are plain file paths.
-These are registered with marginalia under the `file' category so
-marginalia can annotate them with file size and modification time.
-Commands not listed here (grep-style commands returning FILE:LINE:CONTENT)
-are registered under the `fzf-async' category and receive no annotation."
-  :type '(repeat symbol)
-  :group 'fzf-async)
+(defconst fzf-async--categories
+  '(fzf-async-misc
+    fzf-async-file
+    fzf-async-buffer
+    fzf-async-grep
+    fzf-async-bookmark
+    fzf-async-theme
+    fzf-async-imenu
+    fzf-async-multi)
+  "Completion categories owned by fzf-async.
+Each is registered in `completion-category-overrides' so the
+pre-scored passthrough style runs instead of style re-filtering.")
 
 (defun fzf-async--check-completion-setup ()
   "Signal a user-error if the completion configuration is incorrect.
 Guards against two misconfiguration patterns:
 - `fzf-async' in the global `completion-styles' list, which applies the
   style to every completing-read and breaks callers that pass plain lists.
-- `fzf-async' absent from `completion-category-overrides', which means
-  the style never activates and results are silently re-filtered."
+- fzf-async categories absent from `completion-category-overrides',
+  which means the style never activates and results are silently
+  re-filtered."
   (when (memq 'fzf-async completion-styles)
     (user-error
      "fzf-async must not be in `completion-styles' globally (it is).  \
 Remove it and ensure `fzf-async-setup' has been called so it is wired \
 via `completion-category-overrides' only"))
-  (unless (and (assq 'fzf-async completion-category-overrides)
+  (unless (and (assq 'fzf-async-misc completion-category-overrides)
                (assq 'fzf-async-file completion-category-overrides)
                (assq 'fzf-async-multi completion-category-overrides))
     (user-error
-     "fzf-async is missing from `completion-category-overrides'.  \
+     "fzf-async categories missing from `completion-category-overrides'.  \
 Call `fzf-async-setup' before using fzf-async commands")))
 
 (defun fzf-async--bridge-defcustoms (orig-fn &rest args)
@@ -1870,44 +1882,33 @@ Call `fzf-async-setup' before using fzf-async commands")))
 
 ;;;###autoload
 (defun fzf-async-setup ()
-  "Register the fzf-async completion style and category override."
+  "Register the fzf-async completion style and category overrides."
   (add-to-list 'completion-styles-alist
                '(fzf-async fzf-async-try-completion fzf-async-all-completions
                            "Passthrough style for pre-scored async fzf completions."))
-  (add-to-list 'completion-category-overrides
-               '(fzf-async (styles fzf-async)))
 
   (advice-add 'fzf-native-async-start      :around #'fzf-async--bridge-defcustoms)
   (advice-add 'fzf-native-async-candidates :around #'fzf-async--bridge-defcustoms)
 
-  ;; Shadow categories for `file' / `buffer' / multi: keep marginalia +
-  ;; embark integration but force the passthrough style so other styles
-  ;; (e.g. fussy on `file', `basic' on multi) don't re-filter our
+  ;; Register each fzf-async category with the passthrough style so other
+  ;; styles (e.g. fussy on `file', `basic' on multi) don't re-filter our
   ;; pre-scored candidates or cache them client-side past the first call.
-  (add-to-list 'completion-category-overrides
-               '(fzf-async-file (styles fzf-async)))
-  (add-to-list 'completion-category-overrides
-               '(fzf-async-buffer (styles fzf-async)))
-  (add-to-list 'completion-category-overrides
-               '(fzf-async-multi (styles fzf-async)))
+  (dolist (cat fzf-async--categories)
+    (add-to-list 'completion-category-overrides `(,cat (styles fzf-async))))
 
   (with-eval-after-load 'embark
-    (add-to-list 'embark-keymap-alist
-                 '(fzf-async-buffer . embark-buffer-map))
-    (dolist (command fzf-async-file-commands)
-      (add-to-list 'embark-keymap-alist
-                   `(,command . embark-file-map))))
+    (dolist (entry '((fzf-async-file     . embark-file-map)
+                     (fzf-async-buffer   . embark-buffer-map)
+                     (fzf-async-bookmark . embark-bookmark-map)))
+      (add-to-list 'embark-keymap-alist entry)))
 
   (with-eval-after-load 'marginalia
-    ;; Register the file annotator for fzf-async-file so file commands still
-    ;; show size/date without handing control to the `file' completion styles.
-    (add-to-list 'marginalia-annotators
-                 '(fzf-async-file marginalia-annotate-file none))
-    (add-to-list 'marginalia-annotators
-                 '(fzf-async-buffer marginalia-annotate-buffer none))
-    (dolist (command fzf-async-file-commands)
-      (add-to-list 'marginalia-command-categories
-                   `(,command . fzf-async-file)))))
+    (dolist (entry '((fzf-async-file     marginalia-annotate-file     none)
+                     (fzf-async-buffer   marginalia-annotate-buffer   none)
+                     (fzf-async-bookmark marginalia-annotate-bookmark none)
+                     (fzf-async-theme    marginalia-annotate-theme    none)
+                     (fzf-async-imenu    marginalia-annotate-imenu    none)))
+      (add-to-list 'marginalia-annotators entry))))
 
 (provide 'fzf-async)
 ;;; fzf-async.el ends here
