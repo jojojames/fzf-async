@@ -1420,7 +1420,7 @@ when the command was invoked.  Selecting \"default\" disables all themes."
   (interactive)
   (when-let* ((result (fzf-async-completing-read
                        :prompt "spotlight: "
-                       :command "mdfind 'kMDItemFSName != ''")))
+                       :command "mdfind 'kMDItemFSName != \"\"'")))
     (if (string-suffix-p ".app" result)
         (start-process "default-app" nil "open" result)
       (find-file result))))
