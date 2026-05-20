@@ -172,6 +172,16 @@ Read at session start; changing it does not affect running sessions."
   :type 'integer
   :group 'fzf-async)
 
+(defcustom fzf-async-extensions '(pass)
+  "List of fzf-async extensions to load from `fzf-async-setup'.
+Each SYMBOL causes `fzf-async-setup' to `require' the feature
+`fzf-async-SYMBOL' and, if defined, call `fzf-async-SYMBOL-setup'.
+Extensions live in the `extensions/' subdirectory of this package;
+that directory is added to `load-path' the first time
+`fzf-async-setup' runs."
+  :type '(set (const :tag "password-store (pass)" pass))
+  :group 'fzf-async)
+
 (defvar fzf-async--multi-mode nil
   "Dispatch flag for `fzf-async-completing-read' / `fzf-sync-completing-read'.
 - `:extract'         — throw `fzf-async-extracted' with the call's keyword args.
@@ -1894,7 +1904,20 @@ Call `fzf-async-setup' before using fzf-async commands")))
                      (fzf-async-bookmark marginalia-annotate-bookmark none)
                      (fzf-async-theme    marginalia-annotate-theme    none)
                      (fzf-async-imenu    marginalia-annotate-imenu    none)))
-      (add-to-list 'marginalia-annotators entry))))
+      (add-to-list 'marginalia-annotators entry)))
+
+  (when fzf-async-extensions
+    (let ((dir (expand-file-name
+                "extensions"
+                (file-name-directory
+                 (or load-file-name buffer-file-name
+                     (locate-library "fzf-async"))))))
+      (when (file-directory-p dir)
+        (add-to-list 'load-path dir)))
+    (dolist (ext fzf-async-extensions)
+      (require (intern (format "fzf-async-%s" ext)))
+      (let ((setup-fn (intern (format "fzf-async-%s-setup" ext))))
+        (when (fboundp setup-fn) (funcall setup-fn))))))
 
 (provide 'fzf-async)
 ;;; fzf-async.el ends here

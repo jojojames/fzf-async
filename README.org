@@ -251,6 +251,35 @@ For ad-hoc combinations, call ~fzf-async-multi-read~ directly:
      :prompt "files: "))
 #+end_src
 
+* Extensions
+
+Optional integrations live in the ~extensions/~ subdirectory.  They are
+opt-in via ~fzf-async-extensions~ — a list of short symbols ~fzf-async-setup~
+walks: for each ~SYMBOL~ it ~require~ s ~fzf-async-SYMBOL~ and calls
+~fzf-async-SYMBOL-setup~ if defined.  ~extensions/~ is added to
+~load-path~ on first setup so no manual path wiring is needed.
+
+| Symbol  | Library            | Soft dependency  | Commands                                                                                                                              |
+|---------+--------------------+------------------+---------------------------------------------------------------------------------------------------------------------------------------|
+| ~pass~  | ~fzf-async-pass~   | ~password-store~ | ~fzf-async-pass~ (copy), ~fzf-async-pass-edit~, ~-rename~, ~-delete~, ~-add~, ~-generate~, ~-url~ — modeled on ~ivy-pass~ |
+
+Default value of ~fzf-async-extensions~ is ~(pass)~.  Soft dependencies
+are not declared in ~Package-Requires~ — install them yourself if you use
+the extension, they are loaded lazily on first call:
+
+#+begin_src emacs-lisp :tangle yes
+  (use-package password-store)
+#+end_src
+
+To disable extension loading entirely:
+
+#+begin_src emacs-lisp :tangle yes
+  (use-package fzf-async
+    :vc (:url "https://github.com/jojojames/fzf-async" :rev :newest)
+    :custom (fzf-async-extensions nil)
+    :config (fzf-async-setup))
+#+end_src
+
 * Completion style compatibility
 
 ~fzf-async~ registers and uses its own ~completion-style~ named ~fzf-async~.
@@ -367,6 +396,7 @@ single keybinding via [[https://github.com/jojojames/matcha][matcha]].
 | ~fzf-async-max-line-length~    | 256       | Per-line character limit; nil/+N/-N (see note below). |
 | ~fzf-async-cache-size~         | 40        | Per-session LRU cache entries (see note below).       |
 | ~fzf-async-case-mode~          | ~smart~   | Case sensitivity: ~smart~ / ~ignore~ / ~respect~.     |
+| ~fzf-async-extensions~         | ~(pass)~  | Extensions to load from ~extensions/~ during setup.   |
 
 ~fzf-async-highlight~ controls C-side match highlighting.  After the scoring
 pass, the C module calls ~fzf_get_positions~ for the top N candidates and
