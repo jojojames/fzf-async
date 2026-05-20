@@ -183,6 +183,15 @@ that directory is added to `load-path' the first time
               (const :tag "macOS Spotlight (mdfind)" spotlight))
   :group 'fzf-async)
 
+(defconst fzf-async--extensions-dir
+  (when (or load-file-name buffer-file-name)
+    (expand-file-name "extensions"
+                      (file-name-directory
+                       (or load-file-name buffer-file-name))))
+  "Absolute path to the bundled `extensions/' directory.
+Captured at load time so `fzf-async-setup' can add it to `load-path'
+regardless of where it is called from.")
+
 (defvar fzf-async--multi-mode nil
   "Dispatch flag for `fzf-async-completing-read' / `fzf-sync-completing-read'.
 - `:extract'         — throw `fzf-async-extracted' with the call's keyword args.
@@ -1854,13 +1863,9 @@ Call `fzf-async-setup' before using fzf-async commands")))
       (add-to-list 'marginalia-annotators entry)))
 
   (when fzf-async-extensions
-    (let ((dir (expand-file-name
-                "extensions"
-                (file-name-directory
-                 (or load-file-name buffer-file-name
-                     (locate-library "fzf-async"))))))
-      (when (file-directory-p dir)
-        (add-to-list 'load-path dir)))
+    (when (and fzf-async--extensions-dir
+               (file-directory-p fzf-async--extensions-dir))
+      (add-to-list 'load-path fzf-async--extensions-dir))
     (dolist (ext fzf-async-extensions)
       (require (intern (format "fzf-async-%s" ext)))
       (let ((setup-fn (intern (format "fzf-async-%s-setup" ext))))
