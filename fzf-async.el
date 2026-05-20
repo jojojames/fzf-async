@@ -172,14 +172,15 @@ Read at session start; changing it does not affect running sessions."
   :type 'integer
   :group 'fzf-async)
 
-(defcustom fzf-async-extensions '(pass)
+(defcustom fzf-async-extensions '(pass spotlight)
   "List of fzf-async extensions to load from `fzf-async-setup'.
 Each SYMBOL causes `fzf-async-setup' to `require' the feature
 `fzf-async-SYMBOL' and, if defined, call `fzf-async-SYMBOL-setup'.
 Extensions live in the `extensions/' subdirectory of this package;
 that directory is added to `load-path' the first time
 `fzf-async-setup' runs."
-  :type '(set (const :tag "password-store (pass)" pass))
+  :type '(set (const :tag "password-store (pass)" pass)
+              (const :tag "macOS Spotlight (mdfind)" spotlight))
   :group 'fzf-async)
 
 (defvar fzf-async--multi-mode nil
@@ -209,14 +210,6 @@ function   Call the function with no arguments; Returns a directory string."
                  (const :tag "Projectile" projectile)
                  (const :tag "None (default-directory)" nil)
                  (function :tag "Custom function"))
-  :group 'fzf-async)
-
-(defcustom fzf-async-spotlight-audio-directories
-  '("~/Music" "~/Downloads" "~/Desktop")
-  "Directories searched by `fzf-async-spotlight-audio'.
-Each directory is passed to `mdfind -onlyin'; results are concatenated.
-Set to nil to search the whole index."
-  :type '(repeat directory)
   :group 'fzf-async)
 
 ;;; Completion style
@@ -1402,52 +1395,6 @@ when the command was invoked.  Selecting \"default\" disables all themes."
   (interactive)
   (when-let* ((result (fzf-async-completing-read :command "locate ''")))
     (find-file result)))
-
-;;;###autoload
-(defun fzf-async-spotlight ()
-  "Find a file system-wide using Spotlight (mdfind).
-.app bundles are opened with `open'; all other results open with `find-file'."
-  (interactive)
-  (when-let* ((result (fzf-async-completing-read
-                       :prompt "spotlight: "
-                       :command "mdfind 'kMDItemFSName != \"\"'")))
-    (if (string-suffix-p ".app" result)
-        (start-process "default-app" nil "open" result)
-      (find-file result))))
-
-;;;###autoload
-(defun fzf-async-spotlight-apps ()
-  "Find an installed application using Spotlight.
-Opens the selection with `open'."
-  (interactive)
-  (when-let*
-      ((result
-        (fzf-async-completing-read
-         :prompt "spotlight: "
-         :command
-         "mdfind 'kMDItemContentTypeTree == \"com.apple.application-bundle\"'")))
-    (start-process "default-app" nil "open" result)))
-
-;;;###autoload
-(defun fzf-async-spotlight-audio ()
-  "Find audio and play it using Spotlight.
-Constrained to `fzf-async-spotlight-audio-directories'."
-  (interactive)
-  (let* ((query "'kMDItemContentTypeTree == \"public.audio\"'")
-         (command
-          (if fzf-async-spotlight-audio-directories
-              (mapconcat
-               (lambda (dir)
-                 (format "mdfind -onlyin %s %s"
-                         (shell-quote-argument (expand-file-name dir))
-                         query))
-               fzf-async-spotlight-audio-directories
-               "; ")
-            (concat "mdfind " query))))
-    (when-let* ((result (fzf-async-completing-read
-                         :prompt "spotlight: "
-                         :command command)))
-      (start-process "default-app" nil "open" result))))
 
 ;;;###autoload
 (defun fzf-async-tramp ()
